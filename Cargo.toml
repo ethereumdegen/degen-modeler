@@ -1,0 +1,46 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/dgm-mesh", "crates/dgm-atlas", "crates/dgm-scene", "crates/dgm-uv",
+  "crates/dgm-render", "crates/dgm-gltf", "crates/dgm-jev", "crates/dgm-api",
+  "crates/dgm-cli", "crates/dgm-ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+dgm-mesh = { path = "crates/dgm-mesh" }
+dgm-atlas = { path = "crates/dgm-atlas" }
+dgm-scene = { path = "crates/dgm-scene" }
+dgm-uv = { path = "crates/dgm-uv" }
+dgm-render = { path = "crates/dgm-render" }
+dgm-gltf = { path = "crates/dgm-gltf" }
+dgm-jev = { path = "crates/dgm-jev" }
+dgm-api = { path = "crates/dgm-api" }
+
+glam = { version = "0.30", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+clap = { version = "4", features = ["derive"] }
+base64 = "0.22"
+gltf = "1"
+wiremock = "0.6"
+tempfile = "3"
+
+# UI (dgm-ui only)
+bevy = "0.19"
+
+[profile.dev]
+opt-level = 1

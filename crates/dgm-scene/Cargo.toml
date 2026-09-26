@@ -1,0 +1,20 @@
+[package]
+name = "dgm-scene"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Scene doc, op vocabulary, ledger, gate report, digest, rigs and clips."
+
+[dependencies]
+dgm-mesh.workspace = true
+dgm-atlas.workspace = true
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

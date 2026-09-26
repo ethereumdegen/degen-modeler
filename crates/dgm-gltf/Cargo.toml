@@ -1,0 +1,22 @@
+[package]
+name = "dgm-gltf"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Deterministic glTF 2.0 export/import (.glb), unlit + lit fallback, skins, animations."
+
+[dependencies]
+dgm-mesh.workspace = true
+dgm-atlas.workspace = true
+dgm-scene.workspace = true
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+image.workspace = true
+
+[dev-dependencies]
+gltf.workspace = true
+tempfile.workspace = true

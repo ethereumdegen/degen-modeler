@@ -1,0 +1,20 @@
+[package]
+name = "dgm-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Bevy 0.19 viewport + bevy_egui panels over the op layer."
+
+[dependencies]
+dgm-mesh.workspace = true
+dgm-atlas.workspace = true
+dgm-scene.workspace = true
+dgm-gltf.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+
+[[bin]]
+name = "dgm-ui"
+path = "src/main.rs"

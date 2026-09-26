@@ -1,0 +1,25 @@
+[package]
+name = "dgm-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The `dgm` CLI: new/serve/op/check/review/render/export/replay/digest/skill."
+
+[dependencies]
+dgm-mesh.workspace = true
+dgm-atlas.workspace = true
+dgm-scene.workspace = true
+dgm-render.workspace = true
+dgm-gltf.workspace = true
+dgm-jev.workspace = true
+dgm-api.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+
+[[bin]]
+name = "dgm"
+path = "src/main.rs"

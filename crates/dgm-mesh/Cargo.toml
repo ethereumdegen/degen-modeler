@@ -1,0 +1,13 @@
+[package]
+name = "dgm-mesh"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Low-poly indexed mesh kernel: stable ids, topology ops, validators."
+
+[dependencies]
+glam.workspace = true
+serde.workspace = true
+thiserror.workspace = true
