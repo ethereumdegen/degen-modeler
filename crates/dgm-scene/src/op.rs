@@ -28,12 +28,15 @@ impl Axis {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ProjectKind {
-    Planar { axis: Axis },
+/// Projection family for `uv_project`; `axis` rides beside it on the wire
+/// (required for planar/cylindrical, forbidden for box). Kept flat because
+/// serde's `flatten` and `deny_unknown_fields` don't compose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Projection {
+    Planar,
     Box,
-    Cylindrical { axis: Axis },
+    Cylindrical,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -95,7 +98,7 @@ pub enum Op {
     MarkSeams { sel: SelRef },
     ClearSeams { sel: SelRef },
     UvUnwrap { object: String },
-    UvProject { sel: SelRef, #[serde(flatten)] kind: ProjectKind },
+    UvProject { sel: SelRef, kind: Projection, #[serde(default)] axis: Option<Axis> },
     /// Map the selection's UV islands into a named trim region.
     UvAssignTrim { sel: SelRef, sheet: String, region: String },
     UvDeclareMirror { name: String, sel: SelRef },

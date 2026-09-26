@@ -12,11 +12,6 @@ dgm-mesh.workspace = true
 dgm-atlas.workspace = true
 dgm-scene.workspace = true
 glam.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-image.workspace = true
-
-[dev-dependencies]
-gltf.workspace = true
-tempfile.workspace = true
+gltf = { workspace = true, features = ["KHR_materials_unlit"] }

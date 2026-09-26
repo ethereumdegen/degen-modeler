@@ -23,6 +23,6 @@ pub use anim::{Channel, Clip};
 pub use doc::{AlphaMode, Doc, Material, MirrorSet, Object, TextureRef};
 pub use error::OpError;
 pub use gate::{GateReport, budget_findings};
-pub use op::{Axis, Diff, Op, Outcome, ProjectKind};
+pub use op::{Axis, Diff, Op, Outcome, Projection};
 pub use rig::{Bone, Rig};
 pub use select::{ElemKind, Elems, SelRef, SelectQuery, Selection};

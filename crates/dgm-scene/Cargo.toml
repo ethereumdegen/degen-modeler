@@ -10,6 +10,7 @@ description = "Scene doc, op vocabulary, ledger, gate report, digest, rigs and c
 [dependencies]
 dgm-mesh.workspace = true
 dgm-atlas.workspace = true
+dgm-uv.workspace = true
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true

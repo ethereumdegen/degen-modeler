@@ -26,7 +26,6 @@ pub enum OpError {
     Mesh(#[from] MeshError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    /// Integration placeholder: removed once every family is routed.
-    #[error("op `{0}` is not routed yet")]
-    Unrouted(&'static str),
+    #[error(transparent)]
+    Uv(#[from] dgm_uv::UvError),
 }

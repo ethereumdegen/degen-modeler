@@ -75,7 +75,9 @@ connected across non-seam edges (see `select::IslandOf` for the flood fill).
 
 ```rust
 pub struct UvError(...);            // thiserror
-pub fn project(mesh: &mut Mesh, faces: &BTreeSet<FaceId>, kind: &dgm_scene::ProjectKind) -> Result<MeshDelta, UvError>;
+pub fn project(mesh: &mut Mesh, faces: &BTreeSet<FaceId>, kind: &dgm_uv::ProjectKind) -> Result<MeshDelta, UvError>;
+// wire shape (op layer): {"op":"uv_project","sel":…,"kind":"planar"|"box"|"cylindrical","axis":"x|y|z"}
+// axis required for planar/cylindrical, forbidden for box; dispatch converts.
 pub fn unwrap(mesh: &mut Mesh) -> Result<MeshDelta, UvError>;   // seams -> islands -> per-island planar fit + pack
 pub fn assign_trim(mesh: &mut Mesh, faces: &BTreeSet<FaceId>, pack: &Pack, sheet: &str, region: &str) -> Result<MeshDelta, UvError>;
 pub fn set_texel_density(mesh: &mut Mesh, faces: &BTreeSet<FaceId>, texels_per_meter: f32, texture_px: u32) -> Result<MeshDelta, UvError>;
