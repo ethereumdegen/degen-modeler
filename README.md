@@ -34,6 +34,8 @@ Headless proof flags: `dgm-ui <dir> --screenshot out.png --frames N`
 captures the viewport from an offscreen target (the window surface is not
 readable on Metal) and exits; `--preview` triggers the engine preview on
 startup — the exported `.glb` loaded back through Bevy's own glTF loader.
+`dgm-view <file.glb>` is the standalone viewer: orbit/turntable, and a
+texture-atlas panel (`T`) showing every texture the glb carries.
 
 
 ## Layout
