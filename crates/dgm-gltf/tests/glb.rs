@@ -375,3 +375,37 @@ fn vertex_colors_and_emissive_survive_reimport() {
     let s = import_summary(&export_glb(&doc, &pack, &ExportOptions::default()).unwrap()).unwrap();
     assert_eq!(s["vertex_colors"], false);
 }
+
+/// Unlit and emissive are mutually exclusive in glTF (unlit skips the
+/// lighting path, emission included): emissive materials stay lit so their
+/// glow survives in engines; everything else stays unlit.
+#[test]
+fn emissive_materials_are_not_marked_unlit() {
+    let pack = classic();
+    let mut doc = Doc::new(AssetClass::Environment);
+    for (name, emissive) in [("rock", None), ("gem", Some([0.2, 0.7, 1.0]))] {
+        let mut obj = Object::new(prim_box(Vec3::splat(1.0)).unwrap());
+        obj.material = Some(name.into());
+        doc.objects.insert(name.into(), obj);
+        doc.materials.insert(
+            name.into(),
+            Material {
+                texture: TextureRef::Color { rgba: [90, 90, 110, 255] },
+                alpha: AlphaMode::Opaque,
+                double_sided: false,
+                emissive,
+                emissive_strength: 3.0,
+            },
+        );
+    }
+    let glb = export_glb(&doc, &pack, &ExportOptions::default()).unwrap();
+    let json_len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+    let root: serde_json::Value = serde_json::from_slice(&glb[20..20 + json_len]).unwrap();
+    let mats = root["materials"].as_array().unwrap();
+    let by_name = |n: &str| mats.iter().find(|m| m["name"] == n).unwrap();
+    assert!(by_name("rock")["extensions"].get("KHR_materials_unlit").is_some());
+    let gem = by_name("gem");
+    assert!(gem.get("extensions").and_then(|e| e.get("KHR_materials_unlit")).is_none());
+    assert!(gem["extensions"].get("KHR_materials_emissive_strength").is_some());
+    assert_eq!(root["extensionsUsed"], json!(["KHR_materials_unlit", "KHR_materials_emissive_strength"]));
+}

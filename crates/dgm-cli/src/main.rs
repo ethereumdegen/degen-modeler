@@ -93,6 +93,30 @@ pub enum Cmd {
         #[arg(long)]
         install: Option<PathBuf>,
     },
+    /// Manage the project's texture sheets.
+    Trim {
+        #[command(subcommand)]
+        cmd: TrimCmd,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TrimCmd {
+    /// Install a PNG (e.g. a degen-paint reference-generated tile) as a tiling
+    /// trim sheet in the project's pack, with one full-sheet region.
+    Add {
+        dir: PathBuf,
+        png: PathBuf,
+        /// Sheet name used by `material_new {"texture":{"kind":"trim","sheet":…}}`.
+        #[arg(long)]
+        name: String,
+        /// Region name inside the sheet.
+        #[arg(long, default_value = "main")]
+        region: String,
+        /// Replace an existing sheet of the same name.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[tokio::main]
@@ -109,6 +133,9 @@ async fn main() -> Result<()> {
         Cmd::Replay { dir } => cmd_replay(&dir),
         Cmd::Digest { dir } => cmd_digest(&dir),
         Cmd::Skill { install } => cmd_skill(install),
+        Cmd::Trim { cmd: TrimCmd::Add { dir, png, name, region, force } } => {
+            cmd_trim_add(&dir, &png, &name, &region, force)
+        }
     }
 }
 
@@ -318,6 +345,18 @@ fn cmd_replay(dir: &Path) -> Result<()> {
 fn cmd_digest(dir: &Path) -> Result<()> {
     let project = Project::load(dir)?;
     println!("{}", serde_json::to_string_pretty(&orchestrate::scene_digest(&project))?);
+    Ok(())
+}
+
+fn cmd_trim_add(dir: &Path, png: &Path, name: &str, region: &str, force: bool) -> Result<()> {
+    let project = Project::load(dir)?;
+    let pack_dir = project.root.join(&project.meta.pack);
+    let size = dgm_atlas::install_trim(&pack_dir, name, region, png, force)?;
+    println!(
+        "{}",
+        json!({ "sheet": name, "region": region, "size": size,
+                "material": { "kind": "trim", "sheet": name } })
+    );
     Ok(())
 }
 

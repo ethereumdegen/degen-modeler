@@ -342,13 +342,18 @@ pub fn export_glb(doc: &Doc, pack: &Pack, opts: &ExportOptions) -> Result<Vec<u8
     let mut root = Map::new();
     root.insert("asset".into(), json!({ "version": "2.0", "generator": "degen-modeler" }));
     if !materials.is_empty() {
-        let mut used = vec!["KHR_materials_unlit"];
+        let mut used = Vec::new();
+        if doc.materials.values().any(|m| m.emissive.is_none()) {
+            used.push("KHR_materials_unlit");
+        }
         if doc.materials.values().any(|m| {
             m.emissive.is_some() && (m.emissive_strength - 1.0).abs() > f32::EPSILON
         }) {
             used.push("KHR_materials_emissive_strength");
         }
-        root.insert("extensionsUsed".into(), json!(used));
+        if !used.is_empty() {
+            root.insert("extensionsUsed".into(), json!(used));
+        }
     }
     if !nodes.is_empty() {
         root.insert("scene".into(), json!(0));
@@ -509,7 +514,12 @@ fn material_json(
         m.insert("doubleSided".into(), json!(true));
     }
     let mut ext = Map::new();
-    ext.insert("KHR_materials_unlit".into(), json!({}));
+    // Unlit tells engines to skip the lighting path — emission included — so
+    // an emissive material (crystals, lamps) stays on the lit path, where its
+    // glow is honoured; its base color already reads as the glow color.
+    if mat.emissive.is_none() {
+        ext.insert("KHR_materials_unlit".into(), json!({}));
+    }
     if let Some(e) = mat.emissive {
         m.insert("emissiveFactor".into(), json!(e.map(|x| x.clamp(0.0, 1.0))));
         if (mat.emissive_strength - 1.0).abs() > f32::EPSILON {
@@ -519,7 +529,9 @@ fn material_json(
             );
         }
     }
-    m.insert("extensions".into(), Value::Object(ext));
+    if !ext.is_empty() {
+        m.insert("extensions".into(), Value::Object(ext));
+    }
     Ok(Value::Object(m))
 }
 

@@ -6,6 +6,6 @@ pub mod pack;
 pub mod usage;
 
 pub use pack::{
-    AssetClass, Band, Budget, ClipTemplate, Pack, PackError, PackManifest, PresetBone, Rect,
+    AssetClass, Band, Budget, ClipTemplate, Pack, PackError, PackManifest, PresetBone, Rect, install_trim,
     RigPreset, TemplateChannel, TrimSheet,
 };

@@ -502,39 +502,80 @@ alpha edges disappear at the 0.5 cutoff.
 `texels_per_meter`) over `uv_set_texel_density` on face subsets — scaling
 faces inside an island distorts neighbours and can push UVs out of [0,1].
 
-**Textures from outside** (degen-paint, DMS): render `GET /render/uv` first
-and paint over that layout; drop the PNG at the `File` path; the gate then
-measures real density. degen-paint edits are journaled ops — brush passes are
-cheap, iterate there instead of settling for a flat fill.
+**Textures from outside.** Tiling surfaces (walls, floors, bark, cloth): see
+"The default workflow" below — generate from the reference in degen-paint,
+install with `dgm trim add`. Owned atlases (one `File` texture laid out per
+object): render `GET /render/uv` first and paint over that layout; drop the
+PNG at the `File` path (project-relative); the gate then measures real
+density.
 
 **Budgets**: silhouette spends triangles, texture paints detail. A prop reads
 at 100-800 tris; if the silhouette needs nothing more, stop modeling.
 
+## The default workflow: reference in, finished asset out
+
+This is the baseline for anything with a style target — environments above
+all. Every step is a tool call; nothing is hand-edited.
+
+1. **Reference.** Copy the image into the project (`refs/…`) and
+   `set_reference {"path":"refs/…"}` before modeling. Every critique scores
+   against it (`reference_match`).
+2. **Textures from the reference** (degen-paint, one call per sheet, ~$0.05):
+   `dpaint new <sheet> --kind raster --size 1024x1024`, then
+   `dpaint op ai.texture.generate-reference --reference refs/… --prompt "<material>,
+   flat even lighting, no objects" --quality medium --name <sheet>` — `tile`
+   defaults on and the layer lands already seamless. `dpaint render
+   <sheet>.png --width 512 --tile-preview` and look at the 2x2: no seam.
+   Scripted brush strokes are for touch-ups, never the base texture.
+3. **Install as trims:** `dgm trim add <project> <sheet>.png --name <sheet>`
+   (prints the `material_new` texture JSON). Trims tile and stack by design;
+   `uv_set_texel_density` sets the scale (low end of the band = fewer visible
+   repeats).
+4. **Model in batches:** write the ops as a JSON array and `POST /ops` it —
+   one call, one ledger segment, stops at the first error with its index.
+   Fix that op and send the remainder (`jq '.[N:]'`).
+5. **Bake, look inside, critique:** see the environments playbook below;
+   `POST /critique` last, with the reference attached automatically.
+
 ## Environments playbook (caves, rooms, ruins — one connected space)
 
-`set_class environment` first: the budget is 12000 tris and the scene gate
-turns Hard for `scene.intersects` (objects crossing without a `contact`
-tag), `mesh.open_boundary` (open shells without an `open` tag) and
+`dgm new … --class environment`: 12000-tri budget, and the scene gate turns
+Hard for `scene.intersects` (objects crossing without a `contact` tag),
+`mesh.open_boundary` (open shells without an `open` tag) and
 `mesh.inverted`; `scene.floating` warns about anything not touching the rest.
-The reference image is the brief: `set_reference` before modeling so every
-critique judges against it (`reference_match` head).
 
-**Order.** `prim_cavern` (the room; `floor_y` opens the floor) + `prim_tunnel`
-(passages, open ends meet the cavern) -> `solidify` each shell so the mouth
-has thickness -> `join` them + `merge_verts` on the seam -> formations
-(`prim_lathe` cones, `prim_box` boulders) with `subdivide` 1 ->
-`displace_noise` -> `smooth` for faceted rock -> `snap_to_surface` their
-bases onto the joined mesh and `tag_object contact` -> materials (wall /
-floor / moss sheets, an emissive `material_new` for crystals) -> bakes ->
+**Order.** `prim_cavern` (the room; `floor_y` opens the floor) -> cut the
+mouth with `select_save` in_box + `dissolve` -> `subdivide` 1 ->
+`displace_noise` -> `solidify` (real wall thickness; do it after the mouth
+cut so the opening gets rims) -> floor `prim_plane` with `subdivide` 4
+(`smooth:false`) -> **seal the walls to the floor**: `snap_to_surface` the
+cave's low verts onto the floor, then `translate` those same verts ~8 cm
+down so the floor wins cleanly -> formations (`prim_lathe` cones,
+`prim_box` + `subdivide` 2 + `displace_noise` boulders) -> `snap_to_surface`
+their bases -> `tag_object contact` on anything sunk into another surface,
+`open` on cones/planes that are open by design -> materials -> bakes ->
 interior render -> critique -> export.
 
+**Traps this workflow already paid for:**
+- `select_save` in_box with `kind: faces` needs *every* vertex of a face in
+  the box; a cavern's faces are metres wide — size the box from
+  `GET /scene` bounds, and check the saved count before `dissolve`.
+- `rotate` pivots on the selection centroid unless `origin` is given, so a
+  flipped cone's base is not where you computed; read `GET /scene` bounds
+  before selecting by position after a rotate.
+- Vertex lighting lives on vertices: a 4-vertex floor cannot show AO or
+  glow (`glow … on 0 verts`). `subdivide` large flat pieces before baking.
+- Bakes multiply into existing colors: after geometry changes,
+  `clear_vertex_colors` and bake again rather than stacking bakes.
+- An uncut floor + an uneven shell rim = slivers and black AO bands; the
+  snap-and-sink seal above is the fix, not stronger lighting.
+
 **Light is baked, not hoped for.** `bake_ao` on every object (against the
-whole scene), then `bake_sun` from the mouth direction, then `bake_glow`
-with the crystal objects as `lights`; `paint_vertex` with `facing [0,1,0]`
-tints upward faces mossy, `facing [0,-1,0]` darkens undersides. The renderer,
-viewer and GLB (`COLOR_0`) all multiply these into the unlit texture;
-`extra.metrics.lit_range` tells you the value spread you achieved (a flat
-scene sits near 1.0/1.0).
+whole scene; strength ~0.5 — 0.85 crushes the midtones), then `bake_sun`
+(strength ~0.25, cool tint for caves), then `bake_glow` with the crystal
+objects as `lights`; `paint_vertex` with `facing [0,1,0]` tints upward faces
+mossy. The renderer, viewer and GLB (`COLOR_0`) multiply these into the
+unlit texture; `extra.metrics.lit_range` is the value spread you achieved.
 
 **Look from inside.** `GET /render/interior` renders four views from inside
 the bounds (mouth looking in, center looking each way, looking up) — the

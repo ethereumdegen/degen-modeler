@@ -26,9 +26,15 @@ fn light() -> Vec3 {
 
 /// Dim lambert on the flat face normal, front-facing by construction so
 /// double-sided/backfacing geometry still reads.
-pub(crate) fn shade(cam: &Camera, normal: Vec3) -> f32 {
+///
+/// "Front-facing" is judged against the actual view ray to the face
+/// (`centroid`), not the camera-space normal's z: under perspective a
+/// grazing floor has normals with z ≈ 0, and the z test flipped the ones
+/// tilted a degree the wrong way into dark squares.
+pub(crate) fn shade(cam: &Camera, normal: Vec3, centroid: Vec3) -> f32 {
     let n = (cam.view * normal.extend(0.0)).truncate().normalize_or_zero();
-    let n = if n.z < 0.0 { -n } else { n };
+    let p = cam.view.transform_point3(centroid);
+    let n = if n.dot(p) > 0.0 { -n } else { n };
     0.34 + 0.62 * n.dot(light()).max(0.0)
 }
 
@@ -59,7 +65,7 @@ fn textured_view(scene: &SceneGeom, cam: &Camera, px: u32, fill_scale: f32) -> T
     for obj in &scene.objects {
         for tri in &obj.tris {
             let Some(v) = project_tri(cam, px, tri) else { continue };
-            let s = shade(cam, tri.normal) * fill_scale;
+            let s = shade(cam, tri.normal, (tri.pos[0] + tri.pos[1] + tri.pos[2]) / 3.0) * fill_scale;
             fill_tri(&mut t, &v, |uv, bary| {
                 let c = obj.tex.sample(uv);
                 if obj.alpha_mask && c[3] < 128 {
@@ -141,7 +147,7 @@ pub fn heatmap(doc: &Doc, pack: &Pack, view_px: u32) -> Result<RgbaImage, Render
         for obj in &scene.objects {
             for tri in &obj.tris {
                 let Some(v) = project_tri(&cam, view_px, tri) else { continue };
-                let s = shade(&cam, tri.normal);
+                let s = shade(&cam, tri.normal, (tri.pos[0] + tri.pos[1] + tri.pos[2]) / 3.0);
                 let c = mul(heat_color(obj.faces[&tri.face].density, &band), s);
                 fill_tri(&mut t, &v, |_, _| Some(c));
             }

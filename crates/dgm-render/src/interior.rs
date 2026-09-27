@@ -87,7 +87,7 @@ fn interior_view(scene: &SceneGeom, cam: &Camera, px: u32) -> Target {
     let mut t = Target::checker(px);
     for obj in &scene.objects {
         for tri in &obj.tris {
-            let s = shade(cam, tri.normal);
+            let s = shade(cam, tri.normal, (tri.pos[0] + tri.pos[1] + tri.pos[2]) / 3.0);
             let poly = clip_near(to_clip(cam, tri));
             if poly.len() < 3 {
                 continue;

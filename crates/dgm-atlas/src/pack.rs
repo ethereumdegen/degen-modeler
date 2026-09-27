@@ -135,6 +135,86 @@ pub enum PackError {
     Io(PathBuf, std::io::Error),
     #[error("pack manifest {0}: {1}")]
     Json(PathBuf, serde_json::Error),
+    #[error("{0}")]
+    Trim(String),
+}
+
+/// Install `src` (a PNG) into the pack at `pack_dir` as the trim sheet `name`:
+/// copied to `trims/<name>.png` and registered in `pack.json` with one
+/// full-sheet region `region`. This is how an externally made texture — a
+/// degen-paint reference-generated tile — becomes a *tiling* material
+/// (trims wrap and stack by design; owned File textures must stay in
+/// [0,1]). The manifest is edited as JSON so fields this build does not
+/// know survive. An existing sheet is refused unless `force`.
+/// Returns the sheet's pixel size.
+pub fn install_trim(
+    pack_dir: &Path,
+    name: &str,
+    region: &str,
+    src: &Path,
+    force: bool,
+) -> Result<[u32; 2], PackError> {
+    let valid = |s: &str| {
+        !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    };
+    if !valid(name) || !valid(region) {
+        return Err(PackError::Trim(format!(
+            "trim and region names must be [A-Za-z0-9_-]+, got `{name}` / `{region}`"
+        )));
+    }
+    let bytes = std::fs::read(src).map_err(|e| PackError::Io(src.to_path_buf(), e))?;
+    let size = png_size(&bytes)
+        .ok_or_else(|| PackError::Trim(format!("{} is not a PNG", src.display())))?;
+
+    let manifest_path = pack_dir.join("pack.json");
+    let text = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| PackError::Io(manifest_path.clone(), e))?;
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| PackError::Json(manifest_path.clone(), e))?;
+    let trims = manifest
+        .as_object_mut()
+        .ok_or_else(|| PackError::Trim("pack.json is not an object".into()))?
+        .entry("trims")
+        .or_insert_with(|| serde_json::json!({}));
+    let trims = trims
+        .as_object_mut()
+        .ok_or_else(|| PackError::Trim("pack.json `trims` is not an object".into()))?;
+    if trims.contains_key(name) && !force {
+        return Err(PackError::Trim(format!(
+            "trim `{name}` already exists in {}; pass --force to replace it",
+            manifest_path.display()
+        )));
+    }
+
+    let rel = format!("trims/{name}.png");
+    let dst = pack_dir.join(&rel);
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| PackError::Io(parent.to_path_buf(), e))?;
+    }
+    std::fs::write(&dst, &bytes).map_err(|e| PackError::Io(dst.clone(), e))?;
+    trims.insert(
+        name.to_owned(),
+        serde_json::json!({
+            "file": rel,
+            "size": size,
+            "regions": { region: { "x": 0, "y": 0, "w": size[0], "h": size[1] } },
+        }),
+    );
+    let out = serde_json::to_string_pretty(&manifest).expect("json value serializes");
+    std::fs::write(&manifest_path, out).map_err(|e| PackError::Io(manifest_path.clone(), e))?;
+    // Prove the result still loads as a pack before reporting success.
+    Pack::load(pack_dir)?;
+    Ok(size)
+}
+
+/// Width/height from a PNG's IHDR chunk.
+fn png_size(bytes: &[u8]) -> Option<[u32; 2]> {
+    if bytes.len() < 24 || &bytes[0..8] != b"\x89PNG\r\n\x1a\n" || &bytes[12..16] != b"IHDR" {
+        return None;
+    }
+    let w = u32::from_be_bytes(bytes[16..20].try_into().ok()?);
+    let h = u32::from_be_bytes(bytes[20..24].try_into().ok()?);
+    (w > 0 && h > 0).then_some([w, h])
 }
 
 #[derive(Debug, Clone)]
