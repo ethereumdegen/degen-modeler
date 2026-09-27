@@ -24,14 +24,27 @@ pub fn assign_trim(
     sheet: &str,
     region: &str,
 ) -> Result<MeshDelta, UvError> {
-    check_faces(mesh, faces)?;
-    let [u0, v0, u1, v1] = pack.region_uv(sheet, region).ok_or_else(|| {
+    let rect = pack.region_uv(sheet, region).ok_or_else(|| {
         UvError::UnknownRegion { sheet: sheet.into(), region: region.into() }
     })?;
+    assign_rect(mesh, faces, rect)
+}
+
+/// The same fit into an arbitrary UV rect `[u0, v0, u1, v1]` — how owned
+/// (File-texture) atlases get deliberate region layout, e.g. bark on the
+/// left half, foliage on the right, before the atlas is even painted.
+pub fn assign_rect(
+    mesh: &mut Mesh,
+    faces: &BTreeSet<FaceId>,
+    [u0, v0, u1, v1]: [f32; 4],
+) -> Result<MeshDelta, UvError> {
+    check_faces(mesh, faces)?;
     let rect_lo = Vec2::new(u0, v0);
     let rect_size = Vec2::new(u1 - u0, v1 - v0);
     if rect_size.min_element() <= 0.0 {
-        return Err(UvError::Invalid(format!("trim region {sheet}/{region} has zero size")));
+        return Err(UvError::Invalid(format!(
+            "assign rect [{u0}, {v0}, {u1}, {v1}] has zero or negative size"
+        )));
     }
     for island in islands_within(mesh, faces) {
         let (mut lo, hi) = island_uv_bbox(mesh, &island);

@@ -40,5 +40,5 @@ pub use findings::{TexInfo, uv_findings};
 pub use islands::{island_of, islands};
 pub use packing::pack_islands;
 pub use project::{Axis, ProjectKind, project};
-pub use trim::assign_trim;
+pub use trim::{assign_rect, assign_trim};
 pub use unwrap::unwrap;

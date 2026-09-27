@@ -167,6 +167,11 @@ pub const OP_FAMILIES: &[OpFamily] = &[
                 example: r#"{"op":"uv_assign_trim","sel":{"q":"faces_facing","object":"crate","dir":[0.0,1.0,0.0]},"sheet":"wood","region":"planks"}"#,
             },
             OpDoc {
+                name: "uv_assign_rect",
+                what: "Map the selection's UV islands into an arbitrary [u0,v0,u1,v1] rect — region layout on an owned (File-texture) atlas.",
+                example: r#"{"op":"uv_assign_rect","sel":{"q":"all","object":"trunk","kind":"faces"},"rect":[0.02,0.02,0.48,0.98]}"#,
+            },
+            OpDoc {
                 name: "uv_declare_mirror",
                 what: "Declare intentionally overlapping islands (mirrored parts) so `uv.overlap` allows them.",
                 example: r#"{"op":"uv_declare_mirror","name":"arms","sel":{"q":"faces","object":"hero","ids":[10,11]}}"#,

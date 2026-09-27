@@ -101,6 +101,9 @@ pub enum Op {
     UvProject { sel: SelRef, kind: Projection, #[serde(default)] axis: Option<Axis> },
     /// Map the selection's UV islands into a named trim region.
     UvAssignTrim { sel: SelRef, sheet: String, region: String },
+    /// Map the selection's UV islands into an arbitrary `[u0,v0,u1,v1]`
+    /// rect — deliberate region layout on an owned (File-texture) atlas.
+    UvAssignRect { sel: SelRef, rect: [f32; 4] },
     UvDeclareMirror { name: String, sel: SelRef },
     UvSetTexelDensity { sel: SelRef, texels_per_meter: f32 },
     UvPack { object: String, #[serde(default = "dmargin")] margin_px: u32 },
@@ -161,6 +164,7 @@ impl Op {
             Op::UvUnwrap { .. } => "uv_unwrap",
             Op::UvProject { .. } => "uv_project",
             Op::UvAssignTrim { .. } => "uv_assign_trim",
+            Op::UvAssignRect { .. } => "uv_assign_rect",
             Op::UvDeclareMirror { .. } => "uv_declare_mirror",
             Op::UvSetTexelDensity { .. } => "uv_set_texel_density",
             Op::UvPack { .. } => "uv_pack",
