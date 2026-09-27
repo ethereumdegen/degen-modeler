@@ -56,6 +56,14 @@ pub enum Cmd {
         #[arg(long, default_value = "jev")]
         tier: String,
     },
+    /// Art-direction critique by the configured vision model (needs
+    /// OPENAI_API_KEY or ANTHROPIC_API_KEY); writes artifacts/r<rev>-critique.json.
+    Critique {
+        dir: PathBuf,
+        /// Print the raw report JSON instead of the readable form.
+        #[arg(long)]
+        json: bool,
+    },
     /// Render one artifact: sheet|wireframe|uv|heatmap|filmstrip.
     Render {
         dir: PathBuf,
@@ -95,6 +103,7 @@ async fn main() -> Result<()> {
         Cmd::Op { dir, json } => cmd_op(&dir, &json),
         Cmd::Check { dir } => cmd_check(&dir),
         Cmd::Review { dir, tier } => cmd_review(&dir, &tier).await,
+        Cmd::Critique { dir, json } => cmd_critique(&dir, json).await,
         Cmd::Render { dir, kind, out, object, px } => cmd_render(&dir, &kind, out, object, px),
         Cmd::Export { dir, out } => cmd_export(&dir, out),
         Cmd::Replay { dir } => cmd_replay(&dir),
@@ -207,6 +216,37 @@ async fn cmd_review(dir: &Path, tier: &str) -> Result<()> {
     let project = Project::load(dir)?;
     let report = orchestrate::review_project(&project, tier).await?;
     println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+async fn cmd_critique(dir: &Path, raw: bool) -> Result<()> {
+    let project = Project::load(dir)?;
+    let report = orchestrate::critique_project(&project).await?;
+    if raw {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    println!("critique · {} · style_fit {:.2} · {:?} USD · {}ms", report.model,
+        report.style_fit, report.cost_usd.unwrap_or(0.0), report.latency_ms);
+    println!("\nVERDICT\n  {}", report.verdict);
+    if !report.strengths.is_empty() {
+        println!("\nSTRENGTHS");
+        for s in &report.strengths {
+            println!("  + {s}");
+        }
+    }
+    if !report.issues.is_empty() {
+        println!("\nISSUES");
+        for i in &report.issues {
+            println!("  ! [{}] {} — {}", i.severity, i.what, i.where_);
+        }
+    }
+    if !report.suggestions.is_empty() {
+        println!("\nSUGGESTIONS");
+        for (n, s) in report.suggestions.iter().enumerate() {
+            println!("  {}. {} (ops: {}) — {}", n + 1, s.action, s.ops.join(", "), s.impact);
+        }
+    }
     Ok(())
 }
 

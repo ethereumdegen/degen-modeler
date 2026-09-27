@@ -89,5 +89,11 @@ pub fn stage_error(e: StageError) -> ApiError {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal").detail(msg)
         }
         StageError::Review(_) => ApiError::new(StatusCode::BAD_GATEWAY, "review upstream").detail(msg),
+        StageError::Critique(dgm_jev::CritiqueError::NoProvider) => {
+            ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "no vision provider").detail(msg)
+        }
+        StageError::Critique(_) => {
+            ApiError::new(StatusCode::BAD_GATEWAY, "critique upstream").detail(msg)
+        }
     }
 }

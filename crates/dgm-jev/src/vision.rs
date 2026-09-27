@@ -73,23 +73,56 @@ pub(crate) async fn ask(
     uv_png: Option<&[u8]>,
 ) -> Result<VisionOutcome, String> {
     let images: Vec<&[u8]> = sheet_png.into_iter().chain(uv_png).collect();
+    let (text, _model, cost_usd) = chat(provider, &prompt(goal), &images, 1024).await?;
+    let parsed = extract_review_json(&text)
+        .ok_or_else(|| "vision reply: no {heads, notes} JSON found".to_string())?;
+    let mut heads = BTreeMap::new();
+    if let Some(hs) = parsed.get("heads").and_then(Value::as_object) {
+        for (head, raw) in hs {
+            let n = raw.as_f64().or_else(|| raw.get("value").and_then(Value::as_f64));
+            if let Some(n) = n {
+                heads.insert(head.clone(), n as f32);
+            }
+        }
+    }
+    let notes = parsed
+        .get("notes")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    Ok(VisionOutcome { heads, notes, cost_usd })
+}
+
+/// One round against the configured vision model: prompt + PNGs in, the
+/// reply text, the resolved model name and a cost estimate out. Shared by
+/// the review heads and the critique tool.
+pub(crate) async fn chat(
+    provider: &Provider,
+    prompt_text: &str,
+    images: &[&[u8]],
+    max_tokens: u32,
+) -> Result<(String, String, Option<f64>), String> {
     let model_env = std::env::var("DGM_VISION_MODEL").ok();
     let client = reqwest::Client::builder()
         .timeout(TIMEOUT)
         .build()
         .map_err(|e| format!("vision client: {e}"))?;
 
-    let (text, cost_usd) = match provider {
+    match provider {
         Provider::OpenAi { base, key } => {
             let model = model_env.unwrap_or_else(|| OPENAI_DEFAULT_MODEL.into());
-            let mut content = vec![json!({"type": "text", "text": prompt(goal)})];
-            for img in &images {
+            let mut content = vec![json!({"type": "text", "text": prompt_text})];
+            for img in images {
                 content.push(json!({
                     "type": "image_url",
                     "image_url": {"url": format!("data:image/png;base64,{}", B64.encode(img))},
                 }));
             }
-            let body = json!({"model": model, "messages": [{"role": "user", "content": content}]});
+            let body = json!({
+                "model": model,
+                "max_completion_tokens": max_tokens,
+                "messages": [{"role": "user", "content": content}],
+            });
             let reply = post_json(
                 client.post(format!("{}/v1/chat/completions", base.trim_end_matches('/')))
                     .bearer_auth(key),
@@ -108,12 +141,12 @@ pub(crate) async fn ask(
                 OPENAI_USD_PER_MTOK_IN,
                 OPENAI_USD_PER_MTOK_OUT,
             );
-            (text, cost)
+            Ok((text, model, cost))
         }
         Provider::Anthropic { base, key } => {
             let model = model_env.unwrap_or_else(|| ANTHROPIC_DEFAULT_MODEL.into());
             let mut content = Vec::new();
-            for img in &images {
+            for img in images {
                 content.push(json!({
                     "type": "image",
                     "source": {
@@ -123,10 +156,10 @@ pub(crate) async fn ask(
                     },
                 }));
             }
-            content.push(json!({"type": "text", "text": prompt(goal)}));
+            content.push(json!({"type": "text", "text": prompt_text}));
             let body = json!({
                 "model": model,
-                "max_tokens": 1024,
+                "max_tokens": max_tokens,
                 "messages": [{"role": "user", "content": content}],
             });
             let reply = post_json(
@@ -155,28 +188,11 @@ pub(crate) async fn ask(
                 ANTHROPIC_USD_PER_MTOK_IN,
                 ANTHROPIC_USD_PER_MTOK_OUT,
             );
-            (text, cost)
-        }
-    };
-
-    let parsed = extract_review_json(&text)
-        .ok_or_else(|| "vision reply: no {heads, notes} JSON found".to_string())?;
-    let mut heads = BTreeMap::new();
-    if let Some(hs) = parsed.get("heads").and_then(Value::as_object) {
-        for (head, raw) in hs {
-            let n = raw.as_f64().or_else(|| raw.get("value").and_then(Value::as_f64));
-            if let Some(n) = n {
-                heads.insert(head.clone(), n as f32);
-            }
+            Ok((text, model, cost))
         }
     }
-    let notes = parsed
-        .get("notes")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|n| n.as_str().map(str::to_string)).collect())
-        .unwrap_or_default();
-    Ok(VisionOutcome { heads, notes, cost_usd })
 }
+
 
 async fn post_json(req: reqwest::RequestBuilder, body: &Value) -> Result<Value, String> {
     let resp = req.json(body).send().await.map_err(|e| {
@@ -209,6 +225,11 @@ fn cost_from_usage(
 /// with a `heads` or `notes` key. Brace matching skips string contents;
 /// `{` / `}` are ASCII so byte slicing stays on char boundaries.
 pub(crate) fn extract_review_json(text: &str) -> Option<Value> {
+    extract_json_object(text, &["heads", "notes"])
+}
+
+/// Same scan, but the object qualifies when it carries ANY of `keys`.
+pub(crate) fn extract_json_object(text: &str, keys: &[&str]) -> Option<Value> {
     let bytes = text.as_bytes();
     for start in 0..bytes.len() {
         if bytes[start] != b'{' {
@@ -234,7 +255,7 @@ pub(crate) fn extract_review_json(text: &str) -> Option<Value> {
                     if depth == 0 {
                         if let Ok(v) = serde_json::from_str::<Value>(&text[start..=i])
                             && v.is_object()
-                            && (v.get("heads").is_some() || v.get("notes").is_some())
+                            && keys.iter().any(|k| v.get(k).is_some())
                         {
                             return Some(v);
                         }

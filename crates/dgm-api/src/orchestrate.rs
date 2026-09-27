@@ -28,6 +28,8 @@ pub enum StageError {
     Gltf(String),
     #[error("review upstream: {0}")]
     Review(String),
+    #[error(transparent)]
+    Critique(#[from] dgm_jev::CritiqueError),
     #[error("{0}: {1}")]
     Io(PathBuf, std::io::Error),
 }
@@ -247,4 +249,66 @@ pub fn export_project(project: &Project, out: Option<&str>) -> Result<ExportOut,
     }
     std::fs::write(&path, &glb).map_err(|e| StageError::Io(path.clone(), e))?;
     Ok(ExportOut { path, bytes: glb.len(), gate })
+}
+
+/// The art-direction critique: contact sheet + wireframe + every owned
+/// (File) texture, digest and metrics, judged by the configured vision
+/// provider. Requires a key — `CritiqueError::NoProvider` maps to an
+/// explicit HTTP/CLI error, never a silent skip. The report lands in
+/// `artifacts/r<rev>-critique.json`.
+pub async fn critique_project(
+    project: &Project,
+) -> Result<dgm_jev::CritiqueReport, StageError> {
+    let doc = &project.doc;
+    let pack = &project.pack;
+    let rev = doc.revision;
+
+    let gate = dgm_jev::gate(doc, pack);
+    let digest_json = serde_json::to_value(dgm_scene::digest::digest(doc, pack, &gate))
+        .expect("digest serializes");
+    let metrics_json = match dgm_render::metrics(doc, pack) {
+        Ok(m) => serde_json::to_value(&m).expect("metrics serialize"),
+        Err(e) => serde_json::json!({ "warn": format!("metrics unavailable: {e}") }),
+    };
+
+    let mut images: Vec<(String, Vec<u8>)> = Vec::new();
+    if let Ok(img) = dgm_render::contact_sheet(doc, pack, DEFAULT_VIEW_PX) {
+        images.push(("turntable contact sheet (8 views)".into(), png_bytes(&img)));
+    }
+    if let Ok(img) = dgm_render::wireframe_sheet(doc, pack, REVIEW_VIEW_PX) {
+        images.push(("wireframe (topology)".into(), png_bytes(&img)));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for material in doc.materials.values() {
+        if let dgm_scene::TextureRef::File { path } = &material.texture
+            && seen.insert(path.clone())
+            && let Ok(bytes) = std::fs::read(project.root.join(path))
+        {
+            images.push((format!("texture atlas: {path}"), bytes));
+        }
+    }
+
+    let used_tris: u32 = doc
+        .objects
+        .values()
+        .filter(|o| o.lod_of.is_none())
+        .map(|o| o.mesh.tri_count())
+        .sum();
+    let budget = pack.budget(doc.asset_class).map(|b| (used_tris, b.max_tris));
+
+    let report = dgm_jev::critique(dgm_jev::CritiqueInputs {
+        goal: doc.goal.as_deref(),
+        digest: &digest_json,
+        metrics: &metrics_json,
+        images,
+        palette: &pack.manifest.palette,
+        budget,
+    })
+    .await?;
+    write_artifact(
+        project,
+        &format!("r{rev}-critique.json"),
+        &serde_json::to_vec_pretty(&report).expect("report serializes"),
+    )?;
+    Ok(report)
 }

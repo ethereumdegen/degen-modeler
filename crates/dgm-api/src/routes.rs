@@ -28,6 +28,7 @@ pub fn router(state: SharedProject) -> Router {
         .route("/op", post(op_one))
         .route("/ops", post(op_batch))
         .route("/review", post(review))
+        .route("/critique", post(critique))
         .route("/export", post(export))
         .route("/render/{kind}", get(render))
         .route("/artifacts/{file}", get(artifact))
@@ -247,6 +248,14 @@ async fn review(
     };
     let p = state.lock().await;
     let report = orchestrate::review_project(&p, tier).await.map_err(stage_error)?;
+    Ok(Json(report))
+}
+
+async fn critique(
+    State(state): State<SharedProject>,
+) -> Result<Json<dgm_jev::CritiqueReport>, ApiError> {
+    let p = state.lock().await;
+    let report = orchestrate::critique_project(&p).await.map_err(stage_error)?;
     Ok(Json(report))
 }
 

@@ -3,3 +3,4 @@
 *.glb.tmp
 /.integration
 node_modules
+.env

@@ -6,9 +6,12 @@
 //! erroring. The only hard error is genuinely malformed [`ReviewInputs`].
 //! The local CLIP scorer is post-v0 and always reports `scorer: not built`.
 
+pub mod critique;
 mod heads;
 mod jev;
 mod vision;
+
+pub use critique::{CritiqueError, CritiqueInputs, CritiqueReport, critique};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
