@@ -70,7 +70,7 @@ pub fn op_error(e: dgm_scene::OpError) -> ApiError {
         E::BadParams(_) | E::SelectionKind(_) | E::Pack(_) | E::Mesh(_) | E::Uv(_) => {
             ApiError::bad_request("bad op", msg)
         }
-        E::Io(_) | E::Unrouted(_) => {
+        E::Io(_) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal").detail(msg)
         }
     }

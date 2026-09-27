@@ -36,5 +36,9 @@ pub fn import_summary(bytes: &[u8]) -> Result<Value, GltfError> {
         "skins": doc.skins().count(),
         "animations": doc.animations().count(),
         "unlit": doc.materials().any(|m| m.unlit()),
+        "vertex_colors": doc.meshes().flat_map(|m| m.primitives())
+            .any(|p| p.get(&gltf::Semantic::Colors(0)).is_some()),
+        "emissive_materials": doc.materials()
+            .filter(|m| m.emissive_factor().iter().any(|&c| c > 0.0)).count(),
     }))
 }

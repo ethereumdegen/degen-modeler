@@ -287,7 +287,7 @@ async fn render(
     let kind = RenderKind::parse(&kind).ok_or_else(|| {
         ApiError::bad_request(
             "bad render kind",
-            format!("unknown kind `{kind}`; use sheet|wireframe|uv|heatmap|filmstrip"),
+            format!("unknown kind `{kind}`; use sheet|wireframe|uv|heatmap|filmstrip|interior"),
         )
     })?;
     let p = state.lock().await;

@@ -50,6 +50,8 @@ fn fixture(pack: &Pack) -> Doc {
             texture: TextureRef::Color { rgba: [200, 60, 40, 255] },
             alpha: AlphaMode::Opaque,
             double_sided: false,
+            emissive: None,
+            emissive_strength: 1.0,
         },
     );
 
@@ -62,6 +64,8 @@ fn fixture(pack: &Pack) -> Doc {
             texture: TextureRef::Trim { sheet: "wood".into() },
             alpha: AlphaMode::Mask,
             double_sided: true,
+            emissive: None,
+            emissive_strength: 1.0,
         },
     );
 
@@ -271,6 +275,8 @@ fn file_texture_resolves_against_base_dir() {
             texture: TextureRef::File { path: "board.png".into() },
             alpha: AlphaMode::Opaque,
             double_sided: false,
+            emissive: None,
+            emissive_strength: 1.0,
         },
     );
     let opts = ExportOptions { base_dir: pack.root.clone(), embed_report: None };
@@ -316,6 +322,8 @@ fn errors_name_the_offenders() {
             texture: TextureRef::Trim { sheet: "nope".into() },
             alpha: AlphaMode::Opaque,
             double_sided: false,
+            emissive: None,
+            emissive_strength: 1.0,
         },
     );
     let err = export_glb(&doc, &pack, &ExportOptions::default()).unwrap_err();
@@ -330,4 +338,40 @@ fn errors_name_the_offenders() {
     });
     let err = export_glb(&doc, &pack, &ExportOptions::default()).unwrap_err();
     assert!(err.to_string().contains("tail"), "unknown clip bone: {err}");
+}
+
+/// Baked vertex colors and emissive materials must reach the file in a
+/// form a real glTF reader accepts (COLOR_0 u8 VEC4 normalized; emissive
+/// factor + strength extension).
+#[test]
+fn vertex_colors_and_emissive_survive_reimport() {
+    let pack = classic();
+    let mut doc = Doc::new(AssetClass::Environment);
+    let mut mesh = dgm_mesh::primitives::prim_box(Vec3::splat(1.0)).unwrap();
+    let first = *mesh.verts.keys().next().unwrap();
+    mesh.colors.insert(first, [0.25, 0.5, 0.75]);
+    let mut obj = dgm_scene::Object::new(mesh);
+    obj.material = Some("crystal".into());
+    doc.objects.insert("gem".into(), obj);
+    doc.materials.insert(
+        "crystal".into(),
+        Material {
+            texture: TextureRef::Color { rgba: [60, 180, 255, 255] },
+            alpha: AlphaMode::Opaque,
+            double_sided: false,
+            emissive: Some([0.2, 0.7, 1.0]),
+            emissive_strength: 3.0,
+        },
+    );
+    let glb = export_glb(&doc, &pack, &ExportOptions::default()).unwrap();
+    let s = import_summary(&glb).unwrap();
+    assert_eq!(s["vertex_colors"], true);
+    assert_eq!(s["emissive_materials"], 1);
+    let text = String::from_utf8_lossy(&glb);
+    assert!(text.contains("KHR_materials_emissive_strength"));
+
+    // A doc without colors must not grow a COLOR_0 stream.
+    doc.objects.get_mut("gem").unwrap().mesh.colors.clear();
+    let s = import_summary(&export_glb(&doc, &pack, &ExportOptions::default()).unwrap()).unwrap();
+    assert_eq!(s["vertex_colors"], false);
 }

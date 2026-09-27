@@ -50,12 +50,20 @@ pub struct CritiqueReport {
     pub verdict: String,
     /// 0..1 — how well this reads as the stated goal in the stated style.
     pub style_fit: f32,
+    /// 0..1 — how close the renders sit to the attached reference images;
+    /// only present when references were attached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_match: Option<f32>,
     #[serde(default)]
     pub strengths: Vec<String>,
     #[serde(default)]
     pub issues: Vec<Issue>,
     #[serde(default)]
     pub suggestions: Vec<Suggestion>,
+    /// Orchestration notes (e.g. a reference file that could not be read);
+    /// never model output.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
@@ -68,38 +76,79 @@ pub struct CritiqueInputs<'a> {
     pub metrics: &'a Value,
     /// (label, png bytes) — contact sheet, wireframe, the texture atlas…
     pub images: Vec<(String, Vec<u8>)>,
+    /// (label, png/jpg bytes) — the project's reference images (style
+    /// targets). Attached after `images`; when non-empty the reply carries
+    /// a `reference_match` head.
+    pub references: Vec<(String, Vec<u8>)>,
     pub palette: &'a [String],
     /// (used_tris, max_tris) when a class budget applies.
     pub budget: Option<(u32, u32)>,
+    /// Walkable space (building/environment): the prompt asks about
+    /// continuity, scale, lighting and focal points instead of a prop's
+    /// silhouette read.
+    pub environment: bool,
 }
 
 const OP_VOCAB: &str = "extrude, inset, bevel, loop_cut, bridge, merge_verts, dissolve, mirror, \
 decimate_to_budget, lattice, translate/rotate/scale (proportional), snap_to_grid, mark_seams, \
 uv_unwrap, uv_project, uv_assign_trim, uv_assign_rect, uv_set_texel_density, uv_pack, \
-uv_declare_mirror, material_new, rig_apply, rig_auto_weights, rig_paint_weights, clip_apply, \
-clip_key, lod_generate, plus repainting the texture atlas in degen-paint";
+uv_declare_mirror, material_new (emissive), rig_apply, rig_auto_weights, rig_paint_weights, \
+clip_apply, clip_key, lod_generate, prim_tunnel, prim_cavern, subdivide, displace_noise, smooth, \
+solidify, join, snap_to_surface, tag_object, bake_ao, bake_sun, bake_glow, paint_vertex, \
+clear_vertex_colors, plus repainting the texture atlas in degen-paint";
 
 fn prompt(inputs: &CritiqueInputs<'_>) -> String {
+    let n_images = inputs.images.len();
     let image_list = inputs
         .images
         .iter()
         .enumerate()
         .map(|(i, (label, _))| format!("image {}: {label}", i + 1))
+        .chain(inputs.references.iter().enumerate().map(|(i, (label, _))| {
+            format!("image {}: reference image {} (style target) — {label}", n_images + i + 1, i + 1)
+        }))
         .collect::<Vec<_>>()
         .join("\n");
     let budget = inputs
         .budget
         .map(|(used, max)| format!("{used} of {max} triangles used"))
         .unwrap_or_else(|| "no explicit budget".into());
+    let subject = if inputs.environment {
+        "Critique this environment (a walkable space: cave, room, ruin) like a level-art \
+         review: specific, actionable, no flattery. Judge it as ONE continuous space, \
+         not a pile of props. Answer explicitly on: continuity (do shell, floor, passages \
+         and formations read as one connected surface, or do seams, gaps, floating and \
+         intersecting pieces break it?), scale (does a player-height figure fit the \
+         openings, ceiling and formations believably?), lighting (baked light and shadow \
+         range, crevice darkness, where glow comes from; is anything flat/unlit?), and \
+         focal points (where does the eye go, is there a hero element and a path through). \
+         The interior views are the ones that matter; the exterior turntable only checks \
+         the shell."
+    } else {
+        "Critique this asset like a portfolio review: specific, actionable, no flattery."
+    };
+    let reference_rules = if inputs.references.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "The last {} image(s) are reference images (style targets), NOT renders of \
+             this asset. Compare the renders against them — silhouette language, colour \
+             and value structure, lighting mood, level of detail — and score \
+             `reference_match` 0..1 for how close the asset sits to them.\n",
+            inputs.references.len()
+        )
+    };
+    let reference_field = if inputs.references.is_empty() { "" } else { "\n  \"reference_match\": 0.0," };
     format!(
         "You are a senior art director for a stylized low-poly indie game \
          (classic-MMO look: strong silhouettes, hand-painted textures, unlit, texel economy).\n\
-         Critique this asset like a portfolio review: specific, actionable, no flattery.\n\
+         {subject}\n\
          \n\
          Goal: {goal}\n\
          Budget: {budget}\n\
          Style palette (hex): {palette}\n\
          Attached, in order:\n{image_list}\n\
+         {reference_rules}\
          Scene digest JSON: {digest}\n\
          Measured metrics JSON: {metrics}\n\
          \n\
@@ -107,7 +156,7 @@ fn prompt(inputs: &CritiqueInputs<'_>) -> String {
          \n\
          Reply with strict JSON only:\n\
          {{\"verdict\": \"2-3 sentence overall judgment\",\n\
-           \"style_fit\": 0.0,\n\
+           \"style_fit\": 0.0,{reference_field}\n\
            \"strengths\": [\"...\"],\n\
            \"issues\": [{{\"what\": \"...\", \"where\": \"object/face/texture region\", \
          \"severity\": \"low|medium|high\"}}],\n\
@@ -128,13 +177,25 @@ pub async fn critique(inputs: CritiqueInputs<'_>) -> Result<CritiqueReport, Crit
         return Err(CritiqueError::NoImages);
     }
     let started = std::time::Instant::now();
-    let images: Vec<&[u8]> = inputs.images.iter().map(|(_, b)| b.as_slice()).collect();
+    let images: Vec<&[u8]> = inputs
+        .images
+        .iter()
+        .chain(&inputs.references)
+        .map(|(_, b)| b.as_slice())
+        .collect();
     let (text, model, cost_usd) = vision::chat(&provider, &prompt(&inputs), &images, 2048)
         .await
         .map_err(CritiqueError::Call)?;
     let parsed = vision::extract_json_object(&text, &["verdict"])
         .ok_or_else(|| CritiqueError::Parse(text.clone()))?;
 
+    let reference_match = (!inputs.references.is_empty()).then(|| {
+        parsed
+            .get("reference_match")
+            .and_then(Value::as_f64)
+            .map(|v| (v as f32).clamp(0.0, 1.0))
+            .unwrap_or(0.0)
+    });
     let mut report: CritiqueReport = serde_json::from_value(serde_json::json!({
         "verdict": parsed.get("verdict").and_then(Value::as_str).unwrap_or("(no verdict)"),
         "style_fit": parsed.get("style_fit").and_then(Value::as_f64).unwrap_or(0.0),
@@ -146,6 +207,7 @@ pub async fn critique(inputs: CritiqueInputs<'_>) -> Result<CritiqueReport, Crit
     }))
     .map_err(|e| CritiqueError::Parse(format!("{e}; in reply:\n{text}")))?;
     report.style_fit = report.style_fit.clamp(0.0, 1.0);
+    report.reference_match = reference_match;
     report.cost_usd = cost_usd;
     report.latency_ms = started.elapsed().as_millis() as u64;
     Ok(report)

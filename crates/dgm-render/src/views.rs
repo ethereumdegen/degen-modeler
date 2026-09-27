@@ -9,7 +9,7 @@ use glam::{Vec2, Vec3};
 use image::{GrayImage, Rgba, RgbaImage};
 
 use crate::camera::{Camera, SV, orbit, project};
-use crate::geom::{SceneGeom, TriGeom, scene_geom, seam_edges, world_tris};
+use crate::geom::{SceneGeom, TriGeom, scene_geom, seam_edges, vertex_tint, world_tris};
 use crate::raster::{Target, fill_tri, fill_tri_mask, line2, line3};
 use crate::{RenderError, check_px};
 
@@ -26,7 +26,7 @@ fn light() -> Vec3 {
 
 /// Dim lambert on the flat face normal, front-facing by construction so
 /// double-sided/backfacing geometry still reads.
-fn shade(cam: &Camera, normal: Vec3) -> f32 {
+pub(crate) fn shade(cam: &Camera, normal: Vec3) -> f32 {
     let n = (cam.view * normal.extend(0.0)).truncate().normalize_or_zero();
     let n = if n.z < 0.0 { -n } else { n };
     0.34 + 0.62 * n.dot(light()).max(0.0)
@@ -34,6 +34,16 @@ fn shade(cam: &Camera, normal: Vec3) -> f32 {
 
 fn mul(c: [u8; 4], s: f32) -> [u8; 3] {
     [(c[0] as f32 * s) as u8, (c[1] as f32 * s) as u8, (c[2] as f32 * s) as u8]
+}
+
+/// Unlit sample `c` times the vertex tint (linear RGB, 0..1) times the
+/// shade term; `tint == ONE` is bit-identical to [`mul`].
+pub(crate) fn tint_mul(c: [u8; 4], tint: Vec3, s: f32) -> [u8; 3] {
+    [
+        (c[0] as f32 * tint.x * s) as u8,
+        (c[1] as f32 * tint.y * s) as u8,
+        (c[2] as f32 * tint.z * s) as u8,
+    ]
 }
 
 fn project_tri(cam: &Camera, px: u32, tri: &TriGeom) -> Option<[SV; 3]> {
@@ -50,12 +60,12 @@ fn textured_view(scene: &SceneGeom, cam: &Camera, px: u32, fill_scale: f32) -> T
         for tri in &obj.tris {
             let Some(v) = project_tri(cam, px, tri) else { continue };
             let s = shade(cam, tri.normal) * fill_scale;
-            fill_tri(&mut t, &v, |uv| {
+            fill_tri(&mut t, &v, |uv, bary| {
                 let c = obj.tex.sample(uv);
                 if obj.alpha_mask && c[3] < 128 {
                     return None;
                 }
-                Some(mul(c, s))
+                Some(tint_mul(c, vertex_tint(tri, bary), s))
             });
         }
     }
@@ -63,7 +73,7 @@ fn textured_view(scene: &SceneGeom, cam: &Camera, px: u32, fill_scale: f32) -> T
 }
 
 /// Assemble `cols x rows` square tiles into one sheet.
-fn sheet(cols: u32, rows: u32, px: u32, mut tile: impl FnMut(u32) -> RgbaImage) -> RgbaImage {
+pub(crate) fn sheet(cols: u32, rows: u32, px: u32, mut tile: impl FnMut(u32) -> RgbaImage) -> RgbaImage {
     let mut out = RgbaImage::new(cols * px, rows * px);
     for i in 0..cols * rows {
         let img = tile(i);
@@ -133,7 +143,7 @@ pub fn heatmap(doc: &Doc, pack: &Pack, view_px: u32) -> Result<RgbaImage, Render
                 let Some(v) = project_tri(&cam, view_px, tri) else { continue };
                 let s = shade(&cam, tri.normal);
                 let c = mul(heat_color(obj.faces[&tri.face].density, &band), s);
-                fill_tri(&mut t, &v, |_| Some(c));
+                fill_tri(&mut t, &v, |_, _| Some(c));
             }
         }
         t.color

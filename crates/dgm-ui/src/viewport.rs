@@ -18,6 +18,9 @@ pub struct BuiltObject {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
+    /// Linear RGBA per emitted vertex: baked vertex colors (white when the
+    /// mesh has none), multiplied into the unlit base color by Bevy.
+    pub colors: Vec<[f32; 4]>,
 }
 
 /// Triangulate `mesh` into flat streams with hard-edge-aware corner normals.
@@ -34,6 +37,8 @@ pub fn build_object(mesh: &Mesh, hard_angle_deg: f32) -> BuiltObject {
             out.positions.push(pos.to_array());
             out.normals.push(n.to_array());
             out.uvs.push(corner.uv.to_array());
+            let [r, g, b] = mesh.colors.get(&corner.vert).copied().unwrap_or([1.0; 3]);
+            out.colors.push([r, g, b, 1.0]);
         }
     }
     out

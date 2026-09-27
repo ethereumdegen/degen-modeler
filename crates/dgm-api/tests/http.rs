@@ -132,3 +132,42 @@ async fn op_flow_digest_and_errors() {
         .unwrap();
     assert_eq!(res.status(), 403);
 }
+
+#[tokio::test]
+async fn interior_render_and_digest_extras() {
+    let (base, _dir) = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let res = client
+        .post(format!("{base}/ops"))
+        .body(
+            r#"[{"op":"prim_box","object":"room","size":[4.0,3.0,4.0]},
+                {"op":"set_reference","path":"refs/cave.jpg"},
+                {"op":"tag_object","object":"room","tag":"open"}]"#,
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    // The digest surfaces references and tags under `extra`.
+    let scene: Value =
+        client.get(format!("{base}/scene")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(scene["extra"]["references"], serde_json::json!(["refs/cave.jpg"]));
+    assert_eq!(scene["extra"]["tags"]["room"], serde_json::json!(["open"]));
+    assert!(scene["extra"]["metrics"]["connectivity"].is_number());
+
+    // /render/interior: a 2x2 sheet of `px` tiles, named like the others.
+    let res = client.get(format!("{base}/render/interior?px=64")).send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.headers()["content-type"], "image/png");
+    assert_eq!(res.headers()["x-artifact"], "r3-interior.png");
+    let png = res.bytes().await.unwrap();
+    let img = image::load_from_memory(&png).unwrap();
+    assert_eq!((img.width(), img.height()), (128, 128));
+
+    let res = client.get(format!("{base}/render/nope")).send().await.unwrap();
+    assert_eq!(res.status(), 400);
+    let err: Value = res.json().await.unwrap();
+    assert!(err["detail"].as_str().unwrap().contains("interior"));
+}

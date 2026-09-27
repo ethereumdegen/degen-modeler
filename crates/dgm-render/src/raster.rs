@@ -33,12 +33,13 @@ fn orient(ax: f32, ay: f32, bx: f32, by: f32, px: f32, py: f32) -> f32 {
 }
 
 /// Z-buffered fill; both windings rasterize (no backface cull, the z-buffer
-/// sorts). `px_fn` gets the perspective-correct UV and returns the pixel
+/// sorts). `px_fn` gets the perspective-correct UV and the perspective-
+/// correct barycentric weights (corner order of `v`) and returns the pixel
 /// colour, or `None` to discard (alpha mask).
 pub(crate) fn fill_tri(
     t: &mut Target,
     v: &[SV; 3],
-    mut px_fn: impl FnMut(Vec2) -> Option<[u8; 3]>,
+    mut px_fn: impl FnMut(Vec2, [f32; 3]) -> Option<[u8; 3]>,
 ) {
     let area = orient(v[0].x, v[0].y, v[1].x, v[1].y, v[2].x, v[2].y);
     if area.abs() < 1e-8 {
@@ -67,7 +68,8 @@ pub(crate) fn fill_tri(
             }
             let iw = w0 * v[0].inv_w + w1 * v[1].inv_w + w2 * v[2].inv_w;
             let uv = (w0 * v[0].uow + w1 * v[1].uow + w2 * v[2].uow) / iw;
-            if let Some(rgb) = px_fn(uv) {
+            let bary = [w0 * v[0].inv_w / iw, w1 * v[1].inv_w / iw, w2 * v[2].inv_w / iw];
+            if let Some(rgb) = px_fn(uv, bary) {
                 t.depth[idx] = z;
                 t.color.put_pixel(x, y, Rgba([rgb[0], rgb[1], rgb[2], 255]));
             }

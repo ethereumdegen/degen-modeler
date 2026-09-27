@@ -176,6 +176,26 @@ pub fn export_glb(doc: &Doc, pack: &Pack, opts: &ExportOptions) -> Result<Vec<u8
             json!(b.accessor(view, FLOAT, prim.uvs.len(), "VEC2", None)),
         );
 
+        // Baked lighting / masks: u8-normalized COLOR_0, only when the mesh
+        // carries any vertex colors (absent verts read as white). VEC4 with
+        // alpha 255 so every element is 4-byte aligned, as glTF requires.
+        if !obj.mesh.colors.is_empty() {
+            let col_bytes: Vec<u8> = prim
+                .colors
+                .iter()
+                .flat_map(|c| {
+                    let [r, g, b] = c.map(|x| (x.clamp(0.0, 1.0) * 255.0).round() as u8);
+                    [r, g, b, 255]
+                })
+                .collect();
+            let view = b.view(&col_bytes, Some(ARRAY_BUFFER));
+            let acc = b.accessor(view, UNSIGNED_BYTE, prim.colors.len(), "VEC4", None);
+            if let Some(a) = b.accessors[acc].as_object_mut() {
+                a.insert("normalized".into(), json!(true));
+            }
+            attrs.insert("COLOR_0".into(), json!(acc));
+        }
+
         if rig.is_some() {
             let joint_bytes: Vec<u8> = prim.joints.iter().flatten().copied().collect();
             let view = b.view(&joint_bytes, Some(ARRAY_BUFFER));
@@ -322,7 +342,13 @@ pub fn export_glb(doc: &Doc, pack: &Pack, opts: &ExportOptions) -> Result<Vec<u8
     let mut root = Map::new();
     root.insert("asset".into(), json!({ "version": "2.0", "generator": "degen-modeler" }));
     if !materials.is_empty() {
-        root.insert("extensionsUsed".into(), json!(["KHR_materials_unlit"]));
+        let mut used = vec!["KHR_materials_unlit"];
+        if doc.materials.values().any(|m| {
+            m.emissive.is_some() && (m.emissive_strength - 1.0).abs() > f32::EPSILON
+        }) {
+            used.push("KHR_materials_emissive_strength");
+        }
+        root.insert("extensionsUsed".into(), json!(used));
     }
     if !nodes.is_empty() {
         root.insert("scene".into(), json!(0));
@@ -482,7 +508,18 @@ fn material_json(
     if mat.double_sided {
         m.insert("doubleSided".into(), json!(true));
     }
-    m.insert("extensions".into(), json!({ "KHR_materials_unlit": {} }));
+    let mut ext = Map::new();
+    ext.insert("KHR_materials_unlit".into(), json!({}));
+    if let Some(e) = mat.emissive {
+        m.insert("emissiveFactor".into(), json!(e.map(|x| x.clamp(0.0, 1.0))));
+        if (mat.emissive_strength - 1.0).abs() > f32::EPSILON {
+            ext.insert(
+                "KHR_materials_emissive_strength".into(),
+                json!({ "emissiveStrength": mat.emissive_strength }),
+            );
+        }
+    }
+    m.insert("extensions".into(), Value::Object(ext));
     Ok(Value::Object(m))
 }
 
@@ -491,6 +528,7 @@ struct Prim {
     positions: Vec<Vec3>,
     normals: Vec<Vec3>,
     uvs: Vec<[f32; 2]>,
+    colors: Vec<[f32; 3]>,
     joints: Vec<[u8; 4]>,
     weights: Vec<[f32; 4]>,
     indices: Vec<u32>,
@@ -510,6 +548,7 @@ fn weld(mesh: &Mesh, hard_angle_deg: f32, rig: Option<&Rig>) -> Prim {
         positions: Vec::new(),
         normals: Vec::new(),
         uvs: Vec::new(),
+        colors: Vec::new(),
         joints: Vec::new(),
         weights: Vec::new(),
         indices: Vec::new(),
@@ -533,6 +572,7 @@ fn weld(mesh: &Mesh, hard_angle_deg: f32, rig: Option<&Rig>) -> Prim {
                 prim.positions.push(pos);
                 prim.normals.push(normal);
                 prim.uvs.push(corner.uv.to_array());
+                prim.colors.push(mesh.colors.get(&corner.vert).copied().unwrap_or([1.0; 3]));
                 prim.joints.push(joints);
                 prim.weights.push(weights);
                 (prim.positions.len() - 1) as u32

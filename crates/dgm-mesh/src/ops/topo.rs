@@ -11,7 +11,7 @@ use crate::ids::{EdgeKey, FaceId, VertId};
 use crate::mesh::{Corner, Face, Mesh, MeshDelta, MeshError};
 
 /// Unnormalized Newell normal (length = 2x area), for area-weighted averages.
-fn newell(mesh: &Mesh, f: FaceId) -> Result<Vec3, MeshError> {
+pub(crate) fn newell(mesh: &Mesh, f: FaceId) -> Result<Vec3, MeshError> {
     let face = mesh.face(f)?;
     let k = face.corners.len();
     let mut n = Vec3::ZERO;

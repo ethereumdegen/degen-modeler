@@ -138,6 +138,7 @@ fn bevy_mesh(built: &BuiltObject) -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, built.positions.clone());
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, built.normals.clone());
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, built.uvs.clone());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, built.colors.clone());
     mesh
 }
 

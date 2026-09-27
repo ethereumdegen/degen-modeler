@@ -7,6 +7,7 @@
 
 pub mod anim;
 pub mod anim_ops;
+pub mod bake_ops;
 pub mod digest;
 pub mod dispatch;
 pub mod doc;

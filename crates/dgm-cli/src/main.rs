@@ -226,9 +226,16 @@ async fn cmd_critique(dir: &Path, raw: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
     }
-    println!("critique · {} · style_fit {:.2} · {:?} USD · {}ms", report.model,
+    let reference = report
+        .reference_match
+        .map(|r| format!(" · reference_match {r:.2}"))
+        .unwrap_or_default();
+    println!("critique · {} · style_fit {:.2}{reference} · {:?} USD · {}ms", report.model,
         report.style_fit, report.cost_usd.unwrap_or(0.0), report.latency_ms);
     println!("\nVERDICT\n  {}", report.verdict);
+    for n in &report.notes {
+        println!("  note: {n}");
+    }
     if !report.strengths.is_empty() {
         println!("\nSTRENGTHS");
         for s in &report.strengths {
@@ -258,7 +265,7 @@ fn cmd_render(
     px: u32,
 ) -> Result<()> {
     let kind = RenderKind::parse(kind)
-        .ok_or_else(|| anyhow!("unknown render kind `{kind}`; use sheet|wireframe|uv|heatmap|filmstrip"))?;
+        .ok_or_else(|| anyhow!("unknown render kind `{kind}`; use sheet|wireframe|uv|heatmap|filmstrip|interior"))?;
     let project = Project::load(dir)?;
     let rendered = orchestrate::render_project(&project, kind, object.as_deref(), px)?;
     let path = match out {

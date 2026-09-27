@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use dgm_atlas::Pack;
 use dgm_mesh::ops::{deform as mesh_deform, topo};
 use dgm_mesh::{EdgeKey, Mesh, VertId, primitives};
+use dgm_mesh::ops::organic;
 use glam::{Mat4, Quat, Vec3};
 
 use crate::doc::{Doc, Material, MirrorSet, Object, TextureRef};
@@ -258,19 +259,54 @@ pub fn apply(doc: &mut Doc, pack: &Pack, op: &Op) -> Result<Diff, OpError> {
             Ok(Diff::summary(format!("{object}: cleared {n} vertex colors")))
         }
 
-        // ---- plan 19 slices (wired at integration) ----
-        Op::PrimTunnel { .. }
-        | Op::PrimCavern { .. }
-        | Op::Subdivide { .. }
-        | Op::DisplaceNoise { .. }
-        | Op::Smooth { .. }
-        | Op::Solidify { .. }
-        | Op::Join { .. }
-        | Op::SnapToSurface { .. }
-        | Op::BakeAo { .. }
-        | Op::BakeSun { .. }
-        | Op::BakeGlow { .. }
-        | Op::PaintVertex { .. } => Err(OpError::Unrouted(op.name())),
+        // ---- organic geometry (plan 19 E1) ----
+        Op::PrimTunnel { object, path, radii, segments } => {
+            let pts: Vec<Vec3> = path.iter().copied().map(Vec3::from).collect();
+            let mesh = primitives::tunnel(&pts, radii, *segments)?;
+            insert_object(doc, object, mesh)
+        }
+        Op::PrimCavern { object, radii, segments, rings, floor_y, noise, seed } => {
+            let mesh =
+                primitives::cavern(Vec3::from(*radii), *segments, *rings, *floor_y, *noise, *seed)?;
+            insert_object(doc, object, mesh)
+        }
+        Op::Subdivide { object, levels, smooth } => {
+            let mesh = &mut doc.object_mut(object)?.mesh;
+            let delta = organic::subdivide(mesh, *levels, *smooth)?;
+            Ok(Diff::from_delta(object, &delta))
+        }
+        Op::DisplaceNoise { sel, amplitude, scale, seed } => {
+            on_verts(doc, sel, |m, v| organic::displace_noise(m, v, *amplitude, *scale, *seed))
+        }
+        Op::Smooth { sel, iterations, factor } => {
+            on_verts(doc, sel, |m, v| organic::smooth(m, v, *iterations, *factor))
+        }
+        Op::Solidify { object, thickness } => {
+            let mesh = &mut doc.object_mut(object)?.mesh;
+            let delta = organic::solidify(mesh, *thickness)?;
+            Ok(Diff::from_delta(object, &delta))
+        }
+        Op::Join { objects, name } => join_objects(doc, objects, name),
+        Op::SnapToSurface { sel, target, dir } => {
+            let target_mesh = doc.object(target)?.mesh.clone();
+            let dir = dir.map(Vec3::from).unwrap_or(-Vec3::Y);
+            on_verts(doc, sel, |m, v| organic::snap_to_surface(m, v, &target_mesh, dir))
+        }
+
+        // ---- baked lighting (plan 19 E3) ----
+        Op::BakeAo { object, samples, strength } => {
+            crate::bake_ops::bake_ao(doc, object, *samples, *strength)
+        }
+        Op::BakeSun { object, dir, strength, color } => {
+            crate::bake_ops::bake_sun(doc, object, *dir, *strength, *color)
+        }
+        Op::BakeGlow { object, lights, radius, strength } => {
+            crate::bake_ops::bake_glow(doc, object, lights, *radius, *strength)
+        }
+        Op::PaintVertex { sel, color, strength, facing, max_angle_deg } => {
+            let selection = select::resolve(doc, sel)?;
+            crate::bake_ops::paint_vertex(doc, &selection, *color, *strength, *facing, *max_angle_deg)
+        }
 
         // ---- topology (dgm-mesh::ops) ----
         Op::Extrude { sel, offset } => {
@@ -488,6 +524,68 @@ fn insert_object(doc: &mut Doc, name: &str, mesh: Mesh) -> Result<Diff, OpError>
     Ok(Diff {
         summary: format!("{name}: {verts} verts, {faces} faces"),
         created: vec![format!("object:{name}")],
+        ..Diff::default()
+    })
+}
+
+/// Vertex-selection op: resolve, widen to verts, run, diff.
+fn on_verts(
+    doc: &mut Doc,
+    sel: &SelRef,
+    run: impl FnOnce(
+        &mut Mesh,
+        &BTreeSet<VertId>,
+    ) -> Result<dgm_mesh::MeshDelta, dgm_mesh::MeshError>,
+) -> Result<Diff, OpError> {
+    let selection = select::resolve(doc, sel)?;
+    let object = selection.object.clone();
+    let mesh = &mut doc.object_mut(&object)?.mesh;
+    let verts = select::to_verts(mesh, &selection)?;
+    let delta = run(mesh, &verts)?;
+    Ok(Diff::from_delta(&object, &delta))
+}
+
+/// Merge `objects` into one new mesh `name` (first object's material wins;
+/// rigs are not joinable). Sources are removed along with their saved
+/// selections, mirror sets and tags; `contact`/`open` tags carry over.
+fn join_objects(doc: &mut Doc, objects: &[String], name: &str) -> Result<Diff, OpError> {
+    if objects.len() < 2 {
+        return Err(OpError::BadParams("join needs at least two objects".into()));
+    }
+    if doc.objects.contains_key(name) && !objects.iter().any(|o| o == name) {
+        return Err(OpError::ObjectExists(name.into()));
+    }
+    let mut mesh = Mesh::new();
+    let mut material = None;
+    let mut tags = std::collections::BTreeSet::new();
+    for o in objects {
+        let src = doc.object(o)?;
+        if src.rig.is_some() {
+            return Err(OpError::BadParams(format!("join: `{o}` is rigged; rigs cannot be joined")));
+        }
+        mesh.append(&src.mesh);
+        material = material.or_else(|| src.material.clone());
+        if let Some(t) = doc.tags.get(o) {
+            tags.extend(t.iter().cloned());
+        }
+    }
+    for o in objects {
+        doc.objects.remove(o);
+        doc.tags.remove(o);
+        doc.selections.retain(|_, s| &s.object != o);
+        doc.mirror_sets.retain(|_, m| &m.object != o);
+    }
+    let (verts, faces) = (mesh.verts.len(), mesh.faces.len());
+    let mut joined = Object::new(mesh);
+    joined.material = material;
+    doc.objects.insert(name.into(), joined);
+    if !tags.is_empty() {
+        doc.tags.insert(name.into(), tags);
+    }
+    Ok(Diff {
+        summary: format!("joined {} objects into `{name}`: {verts} verts, {faces} faces", objects.len()),
+        created: vec![format!("object:{name}")],
+        removed: objects.iter().filter(|o| *o != name).map(|o| format!("object:{o}")).collect(),
         ..Diff::default()
     })
 }

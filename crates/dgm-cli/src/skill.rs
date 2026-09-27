@@ -193,8 +193,8 @@ pub const OP_FAMILIES: &[OpFamily] = &[
         ops: &[
             OpDoc {
                 name: "material_new",
-                what: "Create a material: texture is {kind:\"trim\",sheet} | {kind:\"file\",path} | {kind:\"color\",rgba}; alpha opaque|mask.",
-                example: r#"{"op":"material_new","name":"wood","texture":{"kind":"trim","sheet":"wood"}}"#,
+                what: "Create a material: texture is {kind:\"trim\",sheet} | {kind:\"file\",path} | {kind:\"color\",rgba}; alpha opaque|mask. `emissive` [r,g,b] (linear) + `emissive_strength` (default 1) make crystals/lamps glow (exported as emissiveFactor + KHR_materials_emissive_strength; `bake_glow` reads them).",
+                example: r#"{"op":"material_new","name":"crystal","texture":{"kind":"color","rgba":[110,200,255,255]},"emissive":[0.3,0.7,1.0],"emissive_strength":3.0}"#,
             },
             OpDoc {
                 name: "object_material",
@@ -283,8 +283,93 @@ pub const OP_FAMILIES: &[OpFamily] = &[
             },
             OpDoc {
                 name: "set_class",
-                what: "Set the asset class (prop|weapon|building|character); picks the tri budget.",
-                example: r#"{"op":"set_class","class":"prop"}"#,
+                what: "Set the asset class (prop|weapon|building|character|environment); picks the tri budget (environment: 12000 in the classic pack) and which scene rules are Hard.",
+                example: r#"{"op":"set_class","class":"environment"}"#,
+            },
+            OpDoc {
+                name: "set_reference",
+                what: "Register a project-relative reference image (style target). Critique attaches every reference as \"reference image N\" and scores `reference_match` against it.",
+                example: r#"{"op":"set_reference","path":"refs/cave.jpg"}"#,
+            },
+            OpDoc {
+                name: "tag_object",
+                what: "Tag an object for the scene gate: `contact` (it may touch/intersect others: stalagmites in a floor), `open` (shell intentionally not closed: cutout planes, a cave mouth). `on:false` removes the tag.",
+                example: r#"{"op":"tag_object","object":"stalagmites","tag":"contact"}"#,
+            },
+        ],
+    },
+    OpFamily {
+        title: "Organic geometry (environments)",
+        ops: &[
+            OpDoc {
+                name: "prim_tunnel",
+                what: "Swept tube along a polyline (>=2 points), one ring per point, OPEN ends; `radii` has one entry (constant) or one per point. UVs: u around, v along, one seam column. Passages between caverns.",
+                example: r#"{"op":"prim_tunnel","object":"passage","path":[[0.0,1.0,0.0],[2.0,1.2,1.0],[4.0,1.0,3.0]],"radii":[1.0,1.3,1.0],"segments":10}"#,
+            },
+            OpDoc {
+                name: "prim_cavern",
+                what: "Ellipsoid (`radii` = x,y,z half-extents) as a UV sphere with `segments` around and `rings` up, faces below `floor_y` removed (open floor), then noise-displaced by `noise` (fraction of the smallest radius) with `seed`. Outward normals; tag `open` if you leave the floor cut, or close it with a floor and `join`.",
+                example: r#"{"op":"prim_cavern","object":"shell","radii":[6.0,4.0,7.0],"segments":16,"rings":10,"floor_y":-3.0,"noise":0.15,"seed":7}"#,
+            },
+            OpDoc {
+                name: "subdivide",
+                what: "Catmull-Clark (`smooth` true, default) or linear midpoint split, `levels` times (default 1). Quadruples faces per level — check the budget first; one level is usually enough for a low-poly organic look.",
+                example: r#"{"op":"subdivide","object":"boulder","levels":1,"smooth":true}"#,
+            },
+            OpDoc {
+                name: "displace_noise",
+                what: "Move the selected verts along their normals by `amplitude` * fbm noise(-1..1) sampled at position/`scale`; deterministic per `seed`. Turns smooth blobs into faceted rock.",
+                example: r#"{"op":"displace_noise","sel":{"q":"all","object":"boulder","kind":"verts"},"amplitude":0.15,"scale":0.8,"seed":3}"#,
+            },
+            OpDoc {
+                name: "smooth",
+                what: "Laplacian relax of the selected verts toward their neighbour centroid, `iterations` (default 1) times by `factor` (0..1, default 0.5); boundary verts stay put.",
+                example: r#"{"op":"smooth","sel":{"q":"all","object":"boulder","kind":"verts"},"iterations":2,"factor":0.5}"#,
+            },
+            OpDoc {
+                name: "solidify",
+                what: "Give an open shell real thickness: offset copy along -normal (`thickness` > 0 = inward), flipped winding, rim quads on every boundary edge. The result is a closed manifold, so the mouth of a cave reads as rock, not a razor edge. Doubles the face count.",
+                example: r#"{"op":"solidify","object":"shell","thickness":0.3}"#,
+            },
+            OpDoc {
+                name: "join",
+                what: "Merge several objects into one new mesh named `name` (sources are removed; the first source's material is kept). Follow with `merge_verts` to weld coincident verts into one connected surface.",
+                example: r#"{"op":"join","objects":["shell","floor","passage"],"name":"cave"}"#,
+            },
+            OpDoc {
+                name: "snap_to_surface",
+                what: "Drop the selected verts onto the nearest surface of `target` along `dir` (default -Y, both directions tested). Plants stalagmite bases on an uneven floor; verts with no hit stay put and are listed.",
+                example: r#"{"op":"snap_to_surface","sel":{"q":"faces_facing","object":"stalagmites","dir":[0.0,-1.0,0.0]},"target":"cave"}"#,
+            },
+        ],
+    },
+    OpFamily {
+        title: "Baked lighting (vertex colors)",
+        ops: &[
+            OpDoc {
+                name: "bake_ao",
+                what: "Per-vertex ambient occlusion against EVERY object in the scene (`samples` hemisphere rays, default 32), multiplied into the vertex colors by `strength` (default 1). Crevices darken; exported as COLOR_0, multiplied over the unlit texture.",
+                example: r#"{"op":"bake_ao","object":"cave","samples":32,"strength":0.9}"#,
+            },
+            OpDoc {
+                name: "bake_sun",
+                what: "Half-lambert directional light from `dir` (the direction light travels) tinted by `color` (default warm), multiplied into vertex colors by `strength` (default 0.5). No shadows — AO covers occlusion.",
+                example: r#"{"op":"bake_sun","object":"cave","dir":[-0.4,-1.0,0.3],"strength":0.6,"color":[1.0,0.95,0.85]}"#,
+            },
+            OpDoc {
+                name: "bake_glow",
+                what: "Additive tint on `object`'s vertices from each emissive `lights` object (its material's emissive * `strength`, fading to zero at `radius` from the light's bounds center). Cheap crystal rim light.",
+                example: r#"{"op":"bake_glow","object":"cave","lights":["crystal_a","crystal_b"],"radius":3.0,"strength":0.8}"#,
+            },
+            OpDoc {
+                name: "paint_vertex",
+                what: "Blend the selection's vertex colors toward `color` by `strength`; with `facing`, only verts on faces whose normal is within `max_angle_deg` (default 45) of it — moss on upward faces, dirt on downward ones.",
+                example: r#"{"op":"paint_vertex","sel":{"q":"all","object":"cave","kind":"faces"},"color":[0.45,0.6,0.3],"strength":0.5,"facing":[0.0,1.0,0.0],"max_angle_deg":40.0}"#,
+            },
+            OpDoc {
+                name: "clear_vertex_colors",
+                what: "Remove every vertex color on the object (back to white) so bakes can be redone from scratch.",
+                example: r#"{"op":"clear_vertex_colors","object":"cave"}"#,
             },
         ],
     },
@@ -345,16 +430,16 @@ const FOOTER: &str = r#"## API (127.0.0.1:7799 by default; localhost only)
 
 ```
 GET  /health                    { ok, name, revision, class }
-GET  /scene                     scene digest (+ extra.metrics when available)
+GET  /scene                     scene digest (+ extra.metrics, extra.references, extra.tags)
 GET  /pack                      pack summary: budgets, trims+regions, rigs, clips, palette
 GET  /ledger?from=N             ledger lines from revision N
 GET  /object/{name}             object digest + uv island count + trim region usage
 POST /op        {op json}       apply one op -> outcome {revision, diff, findings}
 POST /ops       [op json]       apply a batch; stops at first error, reports index
 POST /review    {"tier":"metrics"|"jev"|"vision"}   review report (default jev)
-POST /critique  {}              art-direction critique by the vision model (needs OPENAI_API_KEY); suggestions name ops
+POST /critique  {}              art-direction critique by the vision model (needs OPENAI_API_KEY); sees renders + doc.references (+ interior sheet for building/environment); suggestions name ops
 POST /export    {"out":"path"?} gate + write GLB; 409 with the report on hard findings
-GET  /render/{kind}?object=&px= PNG (sheet|wireframe|uv|heatmap|filmstrip), X-Artifact header
+GET  /render/{kind}?object=&px= PNG (sheet|wireframe|uv|heatmap|filmstrip|interior), X-Artifact header
 GET  /artifacts/{file}          fetch a written artifact
 POST /raycast   {object, origin, dir}   {face, distance, point} or null
 ```
@@ -424,6 +509,42 @@ cheap, iterate there instead of settling for a flat fill.
 
 **Budgets**: silhouette spends triangles, texture paints detail. A prop reads
 at 100-800 tris; if the silhouette needs nothing more, stop modeling.
+
+## Environments playbook (caves, rooms, ruins — one connected space)
+
+`set_class environment` first: the budget is 12000 tris and the scene gate
+turns Hard for `scene.intersects` (objects crossing without a `contact`
+tag), `mesh.open_boundary` (open shells without an `open` tag) and
+`mesh.inverted`; `scene.floating` warns about anything not touching the rest.
+The reference image is the brief: `set_reference` before modeling so every
+critique judges against it (`reference_match` head).
+
+**Order.** `prim_cavern` (the room; `floor_y` opens the floor) + `prim_tunnel`
+(passages, open ends meet the cavern) -> `solidify` each shell so the mouth
+has thickness -> `join` them + `merge_verts` on the seam -> formations
+(`prim_lathe` cones, `prim_box` boulders) with `subdivide` 1 ->
+`displace_noise` -> `smooth` for faceted rock -> `snap_to_surface` their
+bases onto the joined mesh and `tag_object contact` -> materials (wall /
+floor / moss sheets, an emissive `material_new` for crystals) -> bakes ->
+interior render -> critique -> export.
+
+**Light is baked, not hoped for.** `bake_ao` on every object (against the
+whole scene), then `bake_sun` from the mouth direction, then `bake_glow`
+with the crystal objects as `lights`; `paint_vertex` with `facing [0,1,0]`
+tints upward faces mossy, `facing [0,-1,0]` darkens undersides. The renderer,
+viewer and GLB (`COLOR_0`) all multiply these into the unlit texture;
+`extra.metrics.lit_range` tells you the value spread you achieved (a flat
+scene sits near 1.0/1.0).
+
+**Look from inside.** `GET /render/interior` renders four views from inside
+the bounds (mouth looking in, center looking each way, looking up) — the
+turntable sheet cannot show a cave. `extra.metrics.connectivity` is the share
+of objects touching another (aim for 1.0 after snapping), `repetition` how
+many copies of one sheet cover its surface (log-scaled: 1 tile = 0, 64 = 1;
+high = visible wallpaper — break it with a second sheet, `paint_vertex` tints,
+baked AO/sun, or a lower `texels_per_meter`).
+`POST /critique` then sees exterior + interior sheets + the references and
+asks about continuity, scale, lighting and focal points.
 "#;
 
 #[cfg(test)]

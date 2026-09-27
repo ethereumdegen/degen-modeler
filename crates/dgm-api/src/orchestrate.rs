@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use dgm_atlas::AssetClass;
 use dgm_scene::GateReport;
 use dgm_scene::digest::Digest;
 use dgm_scene::project::Project;
@@ -41,6 +42,7 @@ pub enum RenderKind {
     Uv,
     Heatmap,
     Filmstrip,
+    Interior,
 }
 
 impl RenderKind {
@@ -51,6 +53,7 @@ impl RenderKind {
             "uv" => Self::Uv,
             "heatmap" => Self::Heatmap,
             "filmstrip" => Self::Filmstrip,
+            "interior" => Self::Interior,
             _ => return None,
         })
     }
@@ -62,12 +65,15 @@ impl RenderKind {
             Self::Uv => "uv",
             Self::Heatmap => "heatmap",
             Self::Filmstrip => "filmstrip",
+            Self::Interior => "interior",
         }
     }
 }
 
-/// Scene digest with `dgm_render::metrics` merged into `extra.metrics`; when
-/// metrics cannot be computed the digest still ships, with `extra.warn`.
+/// Scene digest with `dgm_render::metrics` merged into `extra.metrics` (or
+/// `extra.warn` when they cannot be computed), plus the project's reference
+/// images and object tags under `extra.references` / `extra.tags` whenever
+/// the doc carries any.
 pub fn scene_digest(project: &Project) -> Digest {
     let gate = dgm_jev::gate(&project.doc, &project.pack);
     let mut digest = dgm_scene::digest::digest(&project.doc, &project.pack, &gate);
@@ -79,6 +85,12 @@ pub fn scene_digest(project: &Project) -> Digest {
         Err(e) => {
             digest.extra.insert("warn".into(), json!(format!("metrics unavailable: {e}")));
         }
+    }
+    if !project.doc.references.is_empty() {
+        digest.extra.insert("references".into(), json!(project.doc.references));
+    }
+    if !project.doc.tags.is_empty() {
+        digest.extra.insert("tags".into(), json!(project.doc.tags));
     }
     digest
 }
@@ -147,6 +159,7 @@ pub fn render_project(
         RenderKind::Wireframe => dgm_render::wireframe_sheet(doc, pack, px),
         RenderKind::Heatmap => dgm_render::heatmap(doc, pack, px),
         RenderKind::Filmstrip => dgm_render::filmstrip(doc, pack, FILMSTRIP_FRAMES, px),
+        RenderKind::Interior => dgm_render::interior_sheet(doc, pack, px),
         RenderKind::Uv => {
             let object = object
                 .ok_or_else(|| StageError::BadRequest("render kind `uv` needs ?object=".into()))?;
@@ -252,9 +265,11 @@ pub fn export_project(project: &Project, out: Option<&str>) -> Result<ExportOut,
 }
 
 /// The art-direction critique: contact sheet + wireframe + every owned
-/// (File) texture, digest and metrics, judged by the configured vision
-/// provider. Requires a key — `CritiqueError::NoProvider` maps to an
-/// explicit HTTP/CLI error, never a silent skip. The report lands in
+/// (File) texture + the project's reference images (plus the interior
+/// sheet for walkable classes), digest and metrics, judged by the
+/// configured vision provider. Requires a key — `CritiqueError::NoProvider`
+/// maps to an explicit HTTP/CLI error, never a silent skip. Unreadable
+/// references are skipped with a note on the report. The report lands in
 /// `artifacts/r<rev>-critique.json`.
 pub async fn critique_project(
     project: &Project,
@@ -262,10 +277,18 @@ pub async fn critique_project(
     let doc = &project.doc;
     let pack = &project.pack;
     let rev = doc.revision;
+    let environment =
+        matches!(doc.asset_class, AssetClass::Building | AssetClass::Environment);
 
     let gate = dgm_jev::gate(doc, pack);
-    let digest_json = serde_json::to_value(dgm_scene::digest::digest(doc, pack, &gate))
-        .expect("digest serializes");
+    let mut digest = dgm_scene::digest::digest(doc, pack, &gate);
+    if !doc.references.is_empty() {
+        digest.extra.insert("references".into(), json!(doc.references));
+    }
+    if !doc.tags.is_empty() {
+        digest.extra.insert("tags".into(), json!(doc.tags));
+    }
+    let digest_json = serde_json::to_value(digest).expect("digest serializes");
     let metrics_json = match dgm_render::metrics(doc, pack) {
         Ok(m) => serde_json::to_value(&m).expect("metrics serialize"),
         Err(e) => serde_json::json!({ "warn": format!("metrics unavailable: {e}") }),
@@ -274,6 +297,12 @@ pub async fn critique_project(
     let mut images: Vec<(String, Vec<u8>)> = Vec::new();
     if let Ok(img) = dgm_render::contact_sheet(doc, pack, DEFAULT_VIEW_PX) {
         images.push(("turntable contact sheet (8 views)".into(), png_bytes(&img)));
+    }
+    if environment && let Ok(img) = dgm_render::interior_sheet(doc, pack, DEFAULT_VIEW_PX) {
+        images.push((
+            "interior sheet (4 views from inside: entrance looking in, center looking +Z, center looking -Z, looking up)".into(),
+            png_bytes(&img),
+        ));
     }
     if let Ok(img) = dgm_render::wireframe_sheet(doc, pack, REVIEW_VIEW_PX) {
         images.push(("wireframe (topology)".into(), png_bytes(&img)));
@@ -288,6 +317,15 @@ pub async fn critique_project(
         }
     }
 
+    let mut notes = Vec::new();
+    let mut references: Vec<(String, Vec<u8>)> = Vec::new();
+    for path in &doc.references {
+        match std::fs::read(project.root.join(path)) {
+            Ok(bytes) => references.push((path.clone(), bytes)),
+            Err(e) => notes.push(format!("reference `{path}` skipped: {e}")),
+        }
+    }
+
     let used_tris: u32 = doc
         .objects
         .values()
@@ -296,15 +334,18 @@ pub async fn critique_project(
         .sum();
     let budget = pack.budget(doc.asset_class).map(|b| (used_tris, b.max_tris));
 
-    let report = dgm_jev::critique(dgm_jev::CritiqueInputs {
+    let mut report = dgm_jev::critique(dgm_jev::CritiqueInputs {
         goal: doc.goal.as_deref(),
         digest: &digest_json,
         metrics: &metrics_json,
         images,
+        references,
         palette: &pack.manifest.palette,
         budget,
+        environment,
     })
     .await?;
+    report.notes = notes;
     write_artifact(
         project,
         &format!("r{rev}-critique.json"),

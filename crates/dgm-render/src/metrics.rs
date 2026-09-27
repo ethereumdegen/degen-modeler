@@ -12,6 +12,7 @@ use image::GrayImage;
 use serde::Serialize;
 
 use crate::RenderError;
+use crate::env_metrics::{connectivity, repetition};
 use crate::geom::{ObjGeom, Tex, TexKind, edge_uvs, scene_geom, seam_edges, world_tris};
 use crate::raster::fill_tri_mask;
 use crate::views::mask_views;
@@ -40,6 +41,18 @@ pub struct Metrics {
     /// Mean silhouette pixel diff between LOD0 and the highest LOD, 0-1;
     /// `null` without LODs.
     pub mask_drift: Option<f32>,
+    /// `[min, max, mean]` luminance (Rec. 709 weights on linear RGB) of the
+    /// effective vertex colors (absent = white) over every non-LOD object
+    /// that carries baked colors; `null` when nothing is baked.
+    pub lit_range: Option<[f32; 3]>,
+    /// Fraction of non-LOD objects that touch another (a vertex within
+    /// 0.02 m of its surface, or an edge crossing it); 1.0 with fewer than
+    /// two objects.
+    pub connectivity: f32,
+    /// Normalized autocorrelation peak (0-1) of the beauty sheet's
+    /// high-pass texture detail — high means visible tiling; `null` when
+    /// nothing renders.
+    pub repetition: Option<f32>,
     pub per_object: BTreeMap<String, ObjectMetrics>,
 }
 
@@ -129,6 +142,9 @@ pub fn metrics(doc: &Doc, pack: &Pack) -> Result<Metrics, RenderError> {
         palette_distance: if palette_n == 0 { 0.0 } else { (palette_acc / palette_n as f64) as f32 },
         density_spread,
         mask_drift: mask_drift(doc),
+        lit_range: lit_range(doc),
+        connectivity: connectivity(doc),
+        repetition: repetition(doc, pack)?,
         per_object,
     })
 }
@@ -139,6 +155,30 @@ fn fold_max(v: &[f32]) -> f32 {
 
 fn mean(v: &[f32]) -> f32 {
     if v.is_empty() { 0.0 } else { v.iter().sum::<f32>() / v.len() as f32 }
+}
+
+/// Rec. 709 luminance of a linear RGB triple.
+fn luminance(c: [f32; 3]) -> f32 {
+    0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+}
+
+/// `[min, max, mean]` vertex-color luminance across the baked non-LOD
+/// objects; uncoloured verts of a baked object count as white.
+fn lit_range(doc: &Doc) -> Option<[f32; 3]> {
+    let (mut lo, mut hi, mut sum, mut n) = (f32::INFINITY, f32::NEG_INFINITY, 0.0f64, 0u64);
+    for obj in doc.objects.values() {
+        if obj.lod_of.is_some() || obj.mesh.colors.is_empty() {
+            continue;
+        }
+        for v in obj.mesh.verts.keys() {
+            let l = luminance(obj.mesh.colors.get(v).copied().unwrap_or([1.0; 3]));
+            lo = lo.min(l);
+            hi = hi.max(l);
+            sum += l as f64;
+            n += 1;
+        }
+    }
+    (n > 0).then(|| [lo, hi, (sum / n as f64) as f32])
 }
 
 fn median(mut v: Vec<f32>) -> Option<f32> {

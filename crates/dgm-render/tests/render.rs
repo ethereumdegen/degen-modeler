@@ -44,6 +44,8 @@ fn box_doc() -> Doc {
             texture: TextureRef::Color { rgba: [168, 111, 61, 255] },
             alpha: AlphaMode::Opaque,
             double_sided: false,
+            emissive: None,
+            emissive_strength: 1.0,
         },
     );
     let mut obj = Object::new(prim_box(Vec3::ONE).unwrap());
@@ -129,6 +131,8 @@ fn stretch_ordering_and_density_on_two_face_mesh() {
             texture: TextureRef::Trim { sheet: "t".into() },
             alpha: AlphaMode::Opaque,
             double_sided: false,
+            emissive: None,
+            emissive_strength: 1.0,
         },
     );
     let mut obj = Object::new(mesh);
@@ -170,6 +174,8 @@ fn occupancy_and_seam_contrast_on_color_quad() {
             texture: TextureRef::Color { rgba: [200, 60, 40, 255] },
             alpha: AlphaMode::Opaque,
             double_sided: false,
+            emissive: None,
+            emissive_strength: 1.0,
         },
     );
     let mut obj = Object::new(mesh);
@@ -207,4 +213,90 @@ fn view_layouts_and_visibility() {
     let uv = uv_layout(&doc, &p, "box").unwrap();
     assert_eq!((uv.width(), uv.height()), (512, 512));
     assert!(silhouette_masks(&doc, "ghost", 1, 32).is_err(), "unknown object errors");
+}
+
+/// The brightest pixel of a tile, as (r, g, b) — box fixtures always have
+/// a face brighter than the checker background.
+fn max_pixel(img: &image::RgbaImage) -> [u8; 3] {
+    let mut best = [0u8; 3];
+    for p in img.pixels() {
+        let [r, g, b, _] = p.0;
+        if r as u32 + g as u32 + b as u32 > best[0] as u32 + best[1] as u32 + best[2] as u32 {
+            best = [r, g, b];
+        }
+    }
+    best
+}
+
+#[test]
+fn vertex_colors_darken_beauty_and_filmstrip_but_not_heatmap() {
+    let p = pack(BTreeMap::new());
+    let plain = box_doc();
+    let mut tinted = box_doc();
+    let mesh = &mut tinted.objects.get_mut("box").unwrap().mesh;
+    let verts: Vec<_> = mesh.verts.keys().copied().collect();
+    for v in verts {
+        mesh.colors.insert(v, [0.5, 0.5, 0.5]);
+    }
+
+    let a = max_pixel(&contact_sheet(&plain, &p, 64).unwrap());
+    let b = max_pixel(&contact_sheet(&tinted, &p, 64).unwrap());
+    assert!(b[0] < a[0] && b[1] < a[1] && b[2] < a[2], "sheet: {b:?} must be darker than {a:?}");
+    // Half tint halves the sample before the shade term: within rounding.
+    assert!((b[0] as i32 - a[0] as i32 / 2).abs() <= 1, "expected ~half of {a:?}, got {b:?}");
+
+    let a = max_pixel(&filmstrip(&plain, &p, 3, 64).unwrap());
+    let b = max_pixel(&filmstrip(&tinted, &p, 3, 64).unwrap());
+    assert!(b[0] < a[0], "filmstrip: {b:?} must be darker than {a:?}");
+
+    assert_eq!(
+        heatmap(&plain, &p, 64).unwrap().as_raw(),
+        heatmap(&tinted, &p, 64).unwrap().as_raw(),
+        "heatmap ignores vertex colors"
+    );
+    assert_ne!(
+        wireframe_sheet(&plain, &p, 64).unwrap().as_raw(),
+        wireframe_sheet(&tinted, &p, 64).unwrap().as_raw(),
+        "wireframe fill carries the tint"
+    );
+}
+
+#[test]
+fn vertex_colors_interpolate_across_a_triangle() {
+    // One quad in the XY plane facing +Z with a black->white gradient
+    // along X: the rendered tile must be darker on the left than the right.
+    let p = pack(BTreeMap::new());
+    let mut doc = Doc::new(AssetClass::Prop);
+    let mut mesh = Mesh::new();
+    let v = [
+        mesh.add_vert(Vec3::new(-1.0, -1.0, 0.0)),
+        mesh.add_vert(Vec3::new(1.0, -1.0, 0.0)),
+        mesh.add_vert(Vec3::new(1.0, 1.0, 0.0)),
+        mesh.add_vert(Vec3::new(-1.0, 1.0, 0.0)),
+    ];
+    mesh.add_face(&v).unwrap();
+    mesh.colors.insert(v[0], [0.0; 3]);
+    mesh.colors.insert(v[3], [0.0; 3]);
+    doc.objects.insert("grad".into(), Object::new(mesh));
+    let strip = filmstrip(&doc, &p, 1, 64).unwrap();
+    let left = strip.get_pixel(20, 32).0;
+    let right = strip.get_pixel(44, 32).0;
+    assert!(left[0] + 40 < right[0], "left {left:?} should be darker than right {right:?}");
+}
+
+#[test]
+fn lit_range_reports_luminance_span() {
+    let p = pack(BTreeMap::new());
+    let plain = box_doc();
+    assert!(metrics(&plain, &p).unwrap().lit_range.is_none(), "no bake → null");
+
+    let mut doc = box_doc();
+    let mesh = &mut doc.objects.get_mut("box").unwrap().mesh;
+    let first = *mesh.verts.keys().next().unwrap();
+    mesh.colors.insert(first, [0.0, 0.0, 0.0]);
+    let n = mesh.verts.len() as f32;
+    let lr = metrics(&doc, &p).unwrap().lit_range.expect("baked object → range");
+    assert_eq!(lr[0], 0.0);
+    assert_eq!(lr[1], 1.0, "uncoloured verts count as white");
+    assert!((lr[2] - (n - 1.0) / n).abs() < 1e-5, "mean {}", lr[2]);
 }

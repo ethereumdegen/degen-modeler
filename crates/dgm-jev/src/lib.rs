@@ -9,9 +9,11 @@
 pub mod critique;
 mod heads;
 mod jev;
+pub mod scene_rules;
 mod vision;
 
 pub use critique::{CritiqueError, CritiqueInputs, CritiqueReport, critique};
+pub use scene_rules::scene_findings;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
@@ -31,7 +33,7 @@ use serde_json::Value;
 pub const HEADS: [&str; 5] = ["done", "seams", "silhouette", "style", "waste"];
 
 /// Compose every deterministic gate rule family into one report:
-/// mesh (per object, attributed), budget, uv, rig, anim.
+/// mesh (per object, attributed), budget, uv, scene, rig, anim.
 pub fn gate(doc: &Doc, pack: &Pack) -> GateReport {
     let mut findings: Vec<Finding> = Vec::new();
     for (name, object) in &doc.objects {
@@ -61,6 +63,7 @@ pub fn gate(doc: &Doc, pack: &Pack) -> GateReport {
         pack.manifest.texel_density,
         pack.manifest.uv_waste_max,
     ));
+    findings.extend(scene_rules::scene_findings(doc, pack));
     findings.extend(dgm_scene::rig::rig_findings(doc));
     findings.extend(dgm_scene::anim::clip_findings(doc));
     GateReport::from_findings(findings)

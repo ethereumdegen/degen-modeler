@@ -59,6 +59,8 @@ fn unknown_trim_sheet_becomes_missing_sheet_not_overlap() {
             texture: TextureRef::Trim { sheet: "no_such_sheet".into() },
             alpha: AlphaMode::Opaque,
             double_sided: false,
+            emissive: None,
+            emissive_strength: 1.0,
         },
     );
 

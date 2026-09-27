@@ -339,4 +339,28 @@ impl Mesh {
             }
         }
     }
+
+    /// Append every vertex, face, seam and color of `other` under fresh ids.
+    /// Returns the `other` -> `self` vertex map so callers can weld or
+    /// select the merged geometry afterwards.
+    pub fn append(&mut self, other: &Mesh) -> BTreeMap<VertId, VertId> {
+        let mut map = BTreeMap::new();
+        for (&v, &p) in &other.verts {
+            let nv = self.add_vert(p);
+            if let Some(c) = other.colors.get(&v) {
+                self.colors.insert(nv, *c);
+            }
+            map.insert(v, nv);
+        }
+        for face in other.faces.values() {
+            let corners = face.corners.iter().map(|c| Corner { vert: map[&c.vert], uv: c.uv }).collect();
+            self.add_face_uv(corners).expect("faces of a valid mesh stay valid under an id remap");
+        }
+        for seam in &other.seams {
+            if let (Some(&a), Some(&b)) = (map.get(&seam.0), map.get(&seam.1)) {
+                self.seams.insert(EdgeKey::new(a, b));
+            }
+        }
+        map
+    }
 }

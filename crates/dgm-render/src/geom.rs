@@ -51,6 +51,20 @@ pub(crate) struct TriGeom {
     pub pos: [Vec3; 3],
     pub uv: [Vec2; 3],
     pub normal: Vec3,
+    /// Linear RGB vertex colors per corner (`Mesh.colors`, white when the
+    /// vertex has none); multiplied into the unlit sample.
+    pub color: [Vec3; 3],
+}
+
+/// Interpolated vertex tint for perspective-correct barycentrics `bary`.
+/// Constant-colour triangles (the untinted common case) return the exact
+/// corner value so white stays bit-exact white.
+pub(crate) fn vertex_tint(tri: &TriGeom, bary: [f32; 3]) -> Vec3 {
+    let [a, b, c] = tri.color;
+    if a == b && b == c {
+        return a;
+    }
+    a * bary[0] + b * bary[1] + c * bary[2]
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -217,6 +231,7 @@ fn object_geom(doc: &Doc, pack: &Pack, name: &str, obj: &Object) -> ObjGeom {
                 pos: c.map(|c| mesh.verts[&c.vert]),
                 uv: c.map(|c| c.uv),
                 normal,
+                color: c.map(|c| mesh.colors.get(&c.vert).map_or(Vec3::ONE, |&rgb| Vec3::from(rgb))),
             });
         }
         let world_area = mesh.face_area(fid).unwrap_or(0.0);

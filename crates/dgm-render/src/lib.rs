@@ -6,12 +6,15 @@
 //! threads, no wall clock — identical inputs give identical pixels.
 
 mod camera;
+mod env_metrics;
 mod geom;
+mod interior;
 mod metrics;
 mod raster;
 mod raycast;
 mod views;
 
+pub use interior::interior_sheet;
 pub use metrics::{Metrics, ObjectMetrics, metrics};
 pub use raycast::{RayHit, raycast};
 pub use views::{

@@ -93,9 +93,19 @@ pub(crate) async fn ask(
     Ok(VisionOutcome { heads, notes, cost_usd })
 }
 
-/// One round against the configured vision model: prompt + PNGs in, the
-/// reply text, the resolved model name and a cost estimate out. Shared by
-/// the review heads and the critique tool.
+/// Media type from the magic bytes: JPEG (reference photos) or PNG
+/// (everything the renderer emits; also the fallback).
+pub(crate) fn image_mime(bytes: &[u8]) -> &'static str {
+    match bytes {
+        [0xff, 0xd8, 0xff, ..] => "image/jpeg",
+        [0x52, 0x49, 0x46, 0x46, _, _, _, _, 0x57, 0x45, 0x42, 0x50, ..] => "image/webp",
+        _ => "image/png",
+    }
+}
+
+/// One round against the configured vision model: prompt + images (PNG or
+/// JPEG bytes) in, the reply text, the resolved model name and a cost
+/// estimate out. Shared by the review heads and the critique tool.
 pub(crate) async fn chat(
     provider: &Provider,
     prompt_text: &str,
@@ -115,7 +125,7 @@ pub(crate) async fn chat(
             for img in images {
                 content.push(json!({
                     "type": "image_url",
-                    "image_url": {"url": format!("data:image/png;base64,{}", B64.encode(img))},
+                    "image_url": {"url": format!("data:{};base64,{}", image_mime(img), B64.encode(img))},
                 }));
             }
             let body = json!({
@@ -151,7 +161,7 @@ pub(crate) async fn chat(
                     "type": "image",
                     "source": {
                         "type": "base64",
-                        "media_type": "image/png",
+                        "media_type": image_mime(img),
                         "data": B64.encode(img),
                     },
                 }));

@@ -5,4 +5,5 @@
 //! `add_face` would have refused, and is deterministic.
 
 pub mod deform;
+pub mod organic;
 pub mod topo;
