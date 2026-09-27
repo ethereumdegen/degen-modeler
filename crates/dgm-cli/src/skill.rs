@@ -169,7 +169,7 @@ pub const OP_FAMILIES: &[OpFamily] = &[
             OpDoc {
                 name: "uv_assign_rect",
                 what: "Map the selection's UV islands into an arbitrary [u0,v0,u1,v1] rect — region layout on an owned (File-texture) atlas.",
-                example: r#"{"op":"uv_assign_rect","sel":{"q":"all","object":"trunk","kind":"faces"},"rect":[0.02,0.02,0.48,0.98]}"#,
+                example: r#"{"op":"uv_assign_rect","sel":{"q":"all","object":"trunk","kind":"faces"},"rect":[0.02,0.02,0.48,0.98],"texels_per_meter":275.0}"#,
             },
             OpDoc {
                 name: "uv_declare_mirror",
@@ -352,6 +352,7 @@ GET  /object/{name}             object digest + uv island count + trim region us
 POST /op        {op json}       apply one op -> outcome {revision, diff, findings}
 POST /ops       [op json]       apply a batch; stops at first error, reports index
 POST /review    {"tier":"metrics"|"jev"|"vision"}   review report (default jev)
+POST /critique  {}              art-direction critique by the vision model (needs OPENAI_API_KEY); suggestions name ops
 POST /export    {"out":"path"?} gate + write GLB; 409 with the report on hard findings
 GET  /render/{kind}?object=&px= PNG (sheet|wireframe|uv|heatmap|filmstrip), X-Artifact header
 GET  /artifacts/{file}          fetch a written artifact
@@ -367,19 +368,62 @@ Errors are `{error, detail?}`: 400 bad op JSON/params, 404 unknown element,
    with `GET /render/sheet` (the artifact name comes back in `X-Artifact`).
 2. Add topology only where the silhouette needs it; watch `budget.used_tris`
    in `GET /scene`.
-3. UV: `mark_seams` -> `uv_unwrap` (or `uv_project`), then `uv_assign_trim`
-   onto pack regions or `uv_set_texel_density` + `uv_pack` for owned islands.
-   `GET /render/uv?object=X` and `GET /render/heatmap` show waste and density.
+3. UV: primitives already carry meter-scaled UVs with fan/cap seams — go
+   straight to `uv_assign_trim` (pack regions) or `uv_assign_rect` (owned
+   atlas). `GET /render/uv?object=X` and `GET /render/heatmap` show waste
+   and density. `mark_seams`/`uv_unwrap`/`uv_project` are for geometry you
+   changed after creation.
 4. Materials from pack trims; rig/animate with pack presets when the class
    calls for it (`rig_apply` -> `rig_auto_weights` -> `clip_apply`).
 5. `POST /review` after meaningful changes. Findings are dotted rules
    (`mesh.*`, `uv.*`, `rig.*`, `anim.*`, `budget.*`); Hard ones block export.
    Heads (0-1): silhouette, style, seams, waste, done — treat < 0.6 as a
    to-do list, and stop when `done` is high and the gate passes.
-6. `POST /export` writes `exports/model.glb` with the gate report embedded.
+6. `POST /critique` before calling it finished: a vision model judges the
+   renders like an art director and answers with actions in this op
+   vocabulary. Then `POST /export`.
 
 Iterate in small steps: one op, read the outcome diff, re-render when shape
 changed. The ledger is your undo-free audit trail — `dgm replay` proves it.
+
+## One-shot playbook (learned the hard way; follow it and the gate stays green)
+
+**Order of operations.** goal -> primitives -> materials BOUND EARLY (density
+rules only run with a texture size) -> UV layout -> deform/detail -> review ->
+critique -> export. Binding materials late hides band violations until the end.
+
+**Owned atlas layout** (one `File` texture shared by several objects):
+partition [0,1]^2 up front — e.g. bark `[0.02,0.02,0.48,0.98]`, foliage
+`[0.52,0.02,0.98,0.98]` — and `uv_assign_rect` each object's islands into its
+region, always passing `texels_per_meter` (the pack band midpoint, e.g. 275
+for band 100..450) so rect-filling can never leave the band. Leave a >=8px
+gutter between regions; paint strictly inside them (erase spill).
+Cross-object stacking on one region is fine; per-object `uv.waste` warns on
+shared atlases are expected — read them per atlas, not per object.
+
+**Revolved shapes** (`prim_lathe`/`prim_cylinder`): side bands, apex fans and
+caps are separate pre-seamed islands with sane UVs. Assign the side band to
+your main region and each fan/cap to a small patch — never cylindrical-project
+a fan (its UV area collapses; density explodes or vanishes). If two islands
+must stack, `uv_declare_mirror` says it is intentional.
+
+**Cutout foliage/cloth**: crossed `prim_plane` quads, one `material_new` with
+`"alpha":"mask","double_sided":true`, all quads `uv_assign_rect` onto the same
+painted region (declare the stack with `uv_declare_mirror` if they share an
+object). Paint the region with a mostly-opaque core and a broken rim — soft
+alpha edges disappear at the 0.5 cutoff.
+
+**Density fixes**: prefer re-assigning the island (`uv_assign_rect` with
+`texels_per_meter`) over `uv_set_texel_density` on face subsets — scaling
+faces inside an island distorts neighbours and can push UVs out of [0,1].
+
+**Textures from outside** (degen-paint, DMS): render `GET /render/uv` first
+and paint over that layout; drop the PNG at the `File` path; the gate then
+measures real density. degen-paint edits are journaled ops — brush passes are
+cheap, iterate there instead of settling for a flat fill.
+
+**Budgets**: silhouette spends triangles, texture paints detail. A prop reads
+at 100-800 tris; if the silhouette needs nothing more, stop modeling.
 "#;
 
 #[cfg(test)]

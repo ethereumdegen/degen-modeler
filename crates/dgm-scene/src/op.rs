@@ -103,7 +103,9 @@ pub enum Op {
     UvAssignTrim { sel: SelRef, sheet: String, region: String },
     /// Map the selection's UV islands into an arbitrary `[u0,v0,u1,v1]`
     /// rect — deliberate region layout on an owned (File-texture) atlas.
-    UvAssignRect { sel: SelRef, rect: [f32; 4] },
+    /// `texels_per_meter` caps the fit so filling the rect never blows the
+    /// density band (islands center at the capped scale instead).
+    UvAssignRect { sel: SelRef, rect: [f32; 4], #[serde(default)] texels_per_meter: Option<f32> },
     UvDeclareMirror { name: String, sel: SelRef },
     UvSetTexelDensity { sel: SelRef, texels_per_meter: f32 },
     UvPack { object: String, #[serde(default = "dmargin")] margin_px: u32 },

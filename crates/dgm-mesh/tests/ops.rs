@@ -196,6 +196,8 @@ fn loop_cut_closed_ring_on_cylinder() {
 #[test]
 fn loop_cut_two_cuts_splits_seam_marks() {
     let mut m = prim_box(Vec3::splat(2.0)).unwrap();
+    // Isolate the behavior under test from the primitive's default seams.
+    m.seams.clear();
     m.seams.insert(e(0, 4));
     let d = loop_cut(&mut m, e(0, 4), 2).unwrap();
     assert_eq!(m.verts.len(), 16);

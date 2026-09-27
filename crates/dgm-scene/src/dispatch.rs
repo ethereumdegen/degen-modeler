@@ -378,12 +378,16 @@ pub fn apply(doc: &mut Doc, pack: &Pack, op: &Op) -> Result<Diff, OpError> {
             let delta = dgm_uv::assign_trim(mesh, &faces, pack, sheet, region)?;
             Ok(Diff::from_delta(&object, &delta))
         }
-        Op::UvAssignRect { sel, rect } => {
+        Op::UvAssignRect { sel, rect, texels_per_meter } => {
             let selection = select::resolve(doc, sel)?;
             let faces = select::to_faces(&selection)?;
             let object = selection.object.clone();
+            let cap = match texels_per_meter {
+                Some(tpm) => Some((*tpm, texture_px(doc, pack, &object)?)),
+                None => None,
+            };
             let mesh = &mut doc.object_mut(&object)?.mesh;
-            let delta = dgm_uv::assign_rect(mesh, &faces, *rect)?;
+            let delta = dgm_uv::assign_rect(mesh, &faces, *rect, cap)?;
             Ok(Diff::from_delta(&object, &delta))
         }
         Op::UvSetTexelDensity { sel, texels_per_meter } => {

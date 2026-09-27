@@ -230,7 +230,7 @@ pub fn uv_layout(doc: &Doc, pack: &Pack, object: &str) -> Result<RgbaImage, Rend
             None => uv_canvas(512, 512, None, UV_DARK),
         },
         Some(TextureRef::File { path }) => {
-            let loaded = image::ImageReader::open(path)
+            let loaded = image::ImageReader::open(crate::geom::file_path(pack, path))
                 .ok()
                 .and_then(|r| r.decode().ok())
                 .map(|d| d.to_rgba8());

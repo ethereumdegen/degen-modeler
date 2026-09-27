@@ -14,7 +14,7 @@ use serde_json::json;
 
 /// Pinned FNV-1a 64 of the fixture export. Any drift means the bytes are no
 /// longer reproducible; update only for an intentional format change.
-const GOLDEN_FNV1A: &str = "41cc6ec28a9c57cb";
+const GOLDEN_FNV1A: &str = "86786a8b1c92e4d7";
 
 fn classic() -> Pack {
     Pack::load(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../packs/classic"))).unwrap()
@@ -162,7 +162,9 @@ fn welding_splits_hard_edges_and_merges_smooth_ones() {
         )
     };
     assert_eq!(count("box"), (24, 36));
-    assert_eq!(count("smooth"), (48, (12 * 2 + 2 * 10) * 3));
+    // 48 ring verts + 2 extra from the primitives' default-UV wrap column
+    // (u = 0 vs u = 2*pi*r on the same position/normal).
+    assert_eq!(count("smooth"), (50, (12 * 2 + 2 * 10) * 3));
 }
 
 #[test]

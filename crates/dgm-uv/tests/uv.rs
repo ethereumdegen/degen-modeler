@@ -135,6 +135,9 @@ fn project_rejects_bad_selection() {
 #[test]
 fn islands_split_on_seams() {
     let mut mesh = prim_box(Vec3::splat(1.0)).unwrap();
+    // A fresh box ships fully seamed: every face its own island.
+    assert_eq!(islands(&mesh).len(), 6);
+    mesh.seams.clear();
     assert_eq!(islands(&mesh).len(), 1);
     let ring: Vec<EdgeKey> = mesh.face(FaceId(0)).unwrap().edges();
     mesh.seams.extend(ring);
@@ -232,6 +235,12 @@ fn set_texel_density_hits_target_within_one_percent() {
 #[test]
 fn set_texel_density_needs_uvs() {
     let mut mesh = plane(1.0, 1.0).unwrap();
+    // Strip the primitive's default UVs to exercise the degenerate path.
+    for face in mesh.faces.values_mut() {
+        for c in &mut face.corners {
+            c.uv = glam::Vec2::ZERO;
+        }
+    }
     let faces: BTreeSet<FaceId> = mesh.faces.keys().copied().collect();
     let err = set_texel_density(&mut mesh, &faces, 128.0, 512).unwrap_err();
     assert!(matches!(err, UvError::Invalid(_)));

@@ -200,6 +200,37 @@ impl Mesh {
             .collect()
     }
 
+    /// UV islands: faces connected across shared non-seam edges, in
+    /// deterministic (lowest-face-id) order. The canonical flood fill the
+    /// selection queries and the UV toolkit mirror.
+    pub fn uv_islands(&self) -> Vec<BTreeSet<FaceId>> {
+        let edge_faces = self.edge_faces();
+        let mut unvisited: BTreeSet<FaceId> = self.faces.keys().copied().collect();
+        let mut islands = Vec::new();
+        while let Some(&start) = unvisited.iter().next() {
+            let mut island = BTreeSet::new();
+            let mut stack = vec![start];
+            unvisited.remove(&start);
+            while let Some(f) = stack.pop() {
+                island.insert(f);
+                for e in self.faces[&f].edges() {
+                    if self.seams.contains(&e) {
+                        continue;
+                    }
+                    if let Some(neighbours) = edge_faces.get(&e) {
+                        for nf in neighbours {
+                            if unvisited.remove(nf) {
+                                stack.push(*nf);
+                            }
+                        }
+                    }
+                }
+            }
+            islands.push(island);
+        }
+        islands
+    }
+
     /// Newell's method; robust for non-convex planar-ish ngons.
     pub fn face_normal(&self, f: FaceId) -> Result<Vec3, MeshError> {
         let face = self.face(f)?;

@@ -106,6 +106,16 @@ struct ResolvedTex {
     px2: Option<f32>,
 }
 
+/// A `File` texture path is project-relative; the project's pack copy lives
+/// at `<project>/pack`, so the pack's parent is the project root —
+/// deterministic resolution, independent of the process cwd.
+pub(crate) fn file_path(pack: &Pack, path: &str) -> std::path::PathBuf {
+    match pack.root.parent() {
+        Some(root) => root.join(path),
+        None => std::path::PathBuf::from(path),
+    }
+}
+
 fn resolve_tex(doc: &Doc, pack: &Pack, obj: &Object) -> ResolvedTex {
     let Some(mat) = obj.material.as_deref().and_then(|m| doc.materials.get(m)) else {
         return ResolvedTex {
@@ -155,7 +165,9 @@ fn resolve_tex(doc: &Doc, pack: &Pack, obj: &Object) -> ResolvedTex {
                 }
             }
         },
-        TextureRef::File { path } => match load_image(Path::new(path)) {
+        // Project-relative; the pack copy lives at <project>/pack, so the
+        // pack's parent IS the project root — deterministic, cwd-free.
+        TextureRef::File { path } => match load_image(&file_path(pack, path)) {
             Some(img) => {
                 let px2 = Some((img.width() * img.height()) as f32);
                 ResolvedTex { tex: Tex::Image(img), kind: TexKind::File, alpha_mask, missing: false, px2 }

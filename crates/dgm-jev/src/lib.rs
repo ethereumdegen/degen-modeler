@@ -96,7 +96,7 @@ fn tex_info(
                 None
             }
         },
-        TextureRef::File { path } => match png_edge(Path::new(path)) {
+        TextureRef::File { path } => match png_edge(&file_path(pack, path)) {
             Some(px) => Some(Some(TexInfo { px, trim: false })),
             None => {
                 findings.push(Finding::warn(
@@ -109,6 +109,15 @@ fn tex_info(
             }
         },
         TextureRef::Color { .. } => Some(None),
+    }
+}
+
+/// `File` texture paths are project-relative; the project's pack copy lives
+/// at `<project>/pack`, so the pack's parent is the project root.
+fn file_path(pack: &Pack, path: &str) -> std::path::PathBuf {
+    match pack.root.parent() {
+        Some(root) => root.join(path),
+        None => std::path::PathBuf::from(path),
     }
 }
 
