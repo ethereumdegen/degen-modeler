@@ -36,6 +36,16 @@ pub struct Material {
     pub alpha: AlphaMode,
     #[serde(default)]
     pub double_sided: bool,
+    /// Linear RGB emission (crystals, lamps); exported as emissiveFactor +
+    /// KHR_materials_emissive_strength.
+    #[serde(default)]
+    pub emissive: Option<[f32; 3]>,
+    #[serde(default = "one")]
+    pub emissive_strength: f32,
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 /// Faces whose UV islands intentionally overlap (mirroring); exempt from the
@@ -77,6 +87,14 @@ pub struct Doc {
     pub selections: BTreeMap<String, Selection>,
     pub mirror_sets: BTreeMap<String, MirrorSet>,
     pub clips: BTreeMap<String, Clip>,
+    /// Project-relative reference images (style targets); fed to
+    /// critique/review and generation prompts.
+    #[serde(default)]
+    pub references: Vec<String>,
+    /// Objects declared as intentionally touching/intersecting others
+    /// (`contact`), or intentionally open shells (`open`).
+    #[serde(default)]
+    pub tags: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Doc {
@@ -90,6 +108,8 @@ impl Doc {
             selections: BTreeMap::new(),
             mirror_sets: BTreeMap::new(),
             clips: BTreeMap::new(),
+            references: Vec::new(),
+            tags: BTreeMap::new(),
         }
     }
 

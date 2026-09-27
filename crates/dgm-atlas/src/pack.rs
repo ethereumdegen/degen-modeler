@@ -12,6 +12,8 @@ pub enum AssetClass {
     Weapon,
     Building,
     Character,
+    /// Walkable spaces: caves, rooms, ruins — one connected surface.
+    Environment,
 }
 
 impl fmt::Display for AssetClass {
@@ -21,6 +23,7 @@ impl fmt::Display for AssetClass {
             AssetClass::Weapon => "weapon",
             AssetClass::Building => "building",
             AssetClass::Character => "character",
+            AssetClass::Environment => "environment",
         };
         f.write_str(s)
     }

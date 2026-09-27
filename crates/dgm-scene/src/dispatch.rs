@@ -131,7 +131,7 @@ pub fn apply(doc: &mut Doc, pack: &Pack, op: &Op) -> Result<Diff, OpError> {
         }
 
         // ---- material ----
-        Op::MaterialNew { name, texture, alpha, double_sided } => {
+        Op::MaterialNew { name, texture, alpha, double_sided, emissive, emissive_strength } => {
             if let TextureRef::Trim { sheet } = texture
                 && !pack.manifest.trims.contains_key(sheet)
             {
@@ -139,7 +139,13 @@ pub fn apply(doc: &mut Doc, pack: &Pack, op: &Op) -> Result<Diff, OpError> {
             }
             doc.materials.insert(
                 name.clone(),
-                Material { texture: texture.clone(), alpha: *alpha, double_sided: *double_sided },
+                Material {
+                    texture: texture.clone(),
+                    alpha: *alpha,
+                    double_sided: *double_sided,
+                    emissive: *emissive,
+                    emissive_strength: *emissive_strength,
+                },
             );
             Ok(Diff::summary(format!("material `{name}`")))
         }
@@ -229,6 +235,42 @@ pub fn apply(doc: &mut Doc, pack: &Pack, op: &Op) -> Result<Diff, OpError> {
             doc.asset_class = *class;
             Ok(Diff::summary(format!("asset class: {class}")))
         }
+        Op::SetReference { path } => {
+            if !doc.references.contains(path) {
+                doc.references.push(path.clone());
+            }
+            Ok(Diff::summary(format!("reference `{path}`")))
+        }
+        Op::TagObject { object, tag, on } => {
+            doc.object(object)?;
+            let tags = doc.tags.entry(object.clone()).or_default();
+            if *on {
+                tags.insert(tag.clone());
+            } else {
+                tags.remove(tag);
+            }
+            Ok(Diff::summary(format!("{object}: tag `{tag}` {}", if *on { "on" } else { "off" })))
+        }
+        Op::ClearVertexColors { object } => {
+            let mesh = &mut doc.object_mut(object)?.mesh;
+            let n = mesh.colors.len();
+            mesh.colors.clear();
+            Ok(Diff::summary(format!("{object}: cleared {n} vertex colors")))
+        }
+
+        // ---- plan 19 slices (wired at integration) ----
+        Op::PrimTunnel { .. }
+        | Op::PrimCavern { .. }
+        | Op::Subdivide { .. }
+        | Op::DisplaceNoise { .. }
+        | Op::Smooth { .. }
+        | Op::Solidify { .. }
+        | Op::Join { .. }
+        | Op::SnapToSurface { .. }
+        | Op::BakeAo { .. }
+        | Op::BakeSun { .. }
+        | Op::BakeGlow { .. }
+        | Op::PaintVertex { .. } => Err(OpError::Unrouted(op.name())),
 
         // ---- topology (dgm-mesh::ops) ----
         Op::Extrude { sel, offset } => {

@@ -79,7 +79,8 @@ impl MeshDelta {
     }
 }
 
-/// Indexed polygon mesh with stable ids and per-corner UVs.
+/// Indexed polygon mesh with stable ids, per-corner UVs and optional
+/// per-vertex colors (baked lighting / masks; absent = white).
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Mesh {
     next_vert: u32,
@@ -88,6 +89,10 @@ pub struct Mesh {
     pub faces: BTreeMap<FaceId, Face>,
     /// UV seam edges (marked by ops, respected by unwrap/islands).
     pub seams: BTreeSet<EdgeKey>,
+    /// Linear RGB 0..1 per vertex, written by bake/paint ops; exported as
+    /// `COLOR_0` and multiplied into the unlit base color everywhere.
+    #[serde(default)]
+    pub colors: BTreeMap<VertId, [f32; 3]>,
 }
 
 impl Mesh {

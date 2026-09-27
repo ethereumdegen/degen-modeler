@@ -28,4 +28,7 @@ pub enum OpError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Uv(#[from] dgm_uv::UvError),
+    /// Integration placeholder for plan-19 slices; removed once routed.
+    #[error("op `{0}` is not routed yet")]
+    Unrouted(&'static str),
 }

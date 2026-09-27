@@ -13,6 +13,9 @@
   },
   "character": {
    "max_tris": 2500
+  },
+  "environment": {
+   "max_tris": 12000
   }
  },
  "texel_density": {

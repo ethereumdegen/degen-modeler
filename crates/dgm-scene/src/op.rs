@@ -59,6 +59,10 @@ fn done() -> u32 { 1 }
 fn dspeed() -> f32 { 1.0 }
 fn dmargin() -> u32 { 4 }
 fn dmerge() -> f32 { 1e-4 }
+fn dhalf() -> f32 { 0.5 }
+fn d32() -> u32 { 32 }
+fn d45() -> f32 { 45.0 }
+fn dwarm() -> [f32; 3] { [1.0, 0.95, 0.85] }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -111,7 +115,7 @@ pub enum Op {
     UvPack { object: String, #[serde(default = "dmargin")] margin_px: u32 },
 
     // ---- material ----
-    MaterialNew { name: String, texture: TextureRef, #[serde(default)] alpha: AlphaMode, #[serde(default)] double_sided: bool },
+    MaterialNew { name: String, texture: TextureRef, #[serde(default)] alpha: AlphaMode, #[serde(default)] double_sided: bool, #[serde(default)] emissive: Option<[f32; 3]>, #[serde(default = "dspeed")] emissive_strength: f32 },
     ObjectMaterial { object: String, material: String },
 
     // ---- rig (preset-first) ----
@@ -135,6 +139,37 @@ pub enum Op {
     LodGenerate { object: String, ratios: Vec<f32> },
     SetGoal { goal: String },
     SetClass { class: AssetClass },
+    /// Register a project-relative reference image (style target).
+    SetReference { path: String },
+    /// Tag an object: `contact` (may touch/intersect others), `open`
+    /// (shell intentionally not closed).
+    TagObject { object: String, tag: String, #[serde(default = "dtrue")] on: bool },
+
+    // ---- organic geometry (plan 19 E1) ----
+    /// Swept tube along a polyline; `radii` per point (or one for all).
+    PrimTunnel { object: String, path: Vec<[f32; 3]>, radii: Vec<f32>, segments: u32 },
+    /// Noise-displaced ellipsoid with the floor cut open below `floor_y`.
+    PrimCavern { object: String, radii: [f32; 3], segments: u32, rings: u32, #[serde(default)] floor_y: Option<f32>, #[serde(default)] noise: f32, #[serde(default)] seed: u64 },
+    Subdivide { object: String, #[serde(default = "done")] levels: u32, #[serde(default = "dtrue")] smooth: bool },
+    DisplaceNoise { sel: SelRef, amplitude: f32, scale: f32, #[serde(default)] seed: u64 },
+    Smooth { sel: SelRef, #[serde(default = "done")] iterations: u32, #[serde(default = "dhalf")] factor: f32 },
+    /// Give a shell real thickness (inward by default).
+    Solidify { object: String, thickness: f32 },
+    /// Merge several objects into one mesh (`merge_verts` afterwards welds).
+    Join { objects: Vec<String>, name: String },
+    /// Drop the selection's verts onto the nearest surface of `target` along
+    /// `-Y` (default) or the given direction.
+    SnapToSurface { sel: SelRef, target: String, #[serde(default)] dir: Option<[f32; 3]> },
+
+    // ---- baked lighting (plan 19 E3) ----
+    BakeAo { object: String, #[serde(default = "d32")] samples: u32, #[serde(default = "dspeed")] strength: f32 },
+    BakeSun { object: String, dir: [f32; 3], #[serde(default = "dhalf")] strength: f32, #[serde(default = "dwarm")] color: [f32; 3] },
+    /// Tint vertices near emissive objects (cheap glow).
+    BakeGlow { object: String, lights: Vec<String>, radius: f32, #[serde(default = "dspeed")] strength: f32 },
+    /// Multiply/replace vertex color over a selection; `facing` limits it to
+    /// faces whose normal is within `max_angle_deg` of `facing`.
+    PaintVertex { sel: SelRef, color: [f32; 3], #[serde(default = "dspeed")] strength: f32, #[serde(default)] facing: Option<[f32; 3]>, #[serde(default = "d45")] max_angle_deg: f32 },
+    ClearVertexColors { object: String },
 }
 
 impl Op {
@@ -186,6 +221,21 @@ impl Op {
             Op::LodGenerate { .. } => "lod_generate",
             Op::SetGoal { .. } => "set_goal",
             Op::SetClass { .. } => "set_class",
+            Op::SetReference { .. } => "set_reference",
+            Op::TagObject { .. } => "tag_object",
+            Op::PrimTunnel { .. } => "prim_tunnel",
+            Op::PrimCavern { .. } => "prim_cavern",
+            Op::Subdivide { .. } => "subdivide",
+            Op::DisplaceNoise { .. } => "displace_noise",
+            Op::Smooth { .. } => "smooth",
+            Op::Solidify { .. } => "solidify",
+            Op::Join { .. } => "join",
+            Op::SnapToSurface { .. } => "snap_to_surface",
+            Op::BakeAo { .. } => "bake_ao",
+            Op::BakeSun { .. } => "bake_sun",
+            Op::BakeGlow { .. } => "bake_glow",
+            Op::PaintVertex { .. } => "paint_vertex",
+            Op::ClearVertexColors { .. } => "clear_vertex_colors",
         }
     }
 }
