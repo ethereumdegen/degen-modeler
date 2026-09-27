@@ -1,4 +1,4 @@
-# CONTRACT — slice interfaces (build-time coordination)
+# CONTRACT — crate interfaces (written for the v0 build wave; code is authoritative where they drift)
 
 Plan of record: `~/ai/starkbot-neo/plans/18-degen-modeler.md`. This file pins
 the cross-crate contracts for the parallel build. The spine (dgm-mesh core,

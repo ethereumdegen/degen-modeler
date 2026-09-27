@@ -30,6 +30,11 @@ curl -s -X POST localhost:7799/export -d '{}'
 Human UI (Bevy 0.19): `dgm-ui /tmp/barrel` — viewport, op ticker, review
 panel, engine preview of the exported `.glb`, clip playback. Humans and
 agents write to the same ledger; edits interleave.
+Headless proof flags: `dgm-ui <dir> --screenshot out.png --frames N`
+captures the viewport from an offscreen target (the window surface is not
+readable on Metal) and exits; `--preview` triggers the engine preview on
+startup — the exported `.glb` loaded back through Bevy's own glTF loader.
+
 
 ## Layout
 

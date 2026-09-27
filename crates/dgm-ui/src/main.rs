@@ -29,12 +29,14 @@ struct Args {
     root: PathBuf,
     screenshot: Option<PathBuf>,
     frames: u32,
+    preview: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut root = None;
     let mut screenshot = None;
     let mut frames = 30u32;
+    let mut preview = false;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -46,8 +48,12 @@ fn parse_args() -> Result<Args, String> {
                 let n = it.next().ok_or("--frames needs a number")?;
                 frames = n.parse().map_err(|_| format!("bad --frames value `{n}`"))?;
             }
+            "--preview" => preview = true,
             "--help" | "-h" => {
-                return Err("usage: dgm-ui <project-dir> [--screenshot out.png --frames N]".into());
+                return Err(
+                    "usage: dgm-ui <project-dir> [--screenshot out.png --frames N] [--preview]"
+                        .into(),
+                );
             }
             other if root.is_none() && !other.starts_with('-') => {
                 root = Some(PathBuf::from(other));
@@ -56,9 +62,11 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     Ok(Args {
-        root: root.ok_or("usage: dgm-ui <project-dir> [--screenshot out.png --frames N]")?,
+        root: root
+            .ok_or("usage: dgm-ui <project-dir> [--screenshot out.png --frames N] [--preview]")?,
         screenshot,
         frames,
+        preview,
     })
 }
 
@@ -105,7 +113,7 @@ fn main() -> ExitCode {
     .init_resource::<state::Views>()
     .init_resource::<state::DigestCache>()
     .init_resource::<state::Playback>()
-    .init_resource::<state::Preview>()
+    .insert_resource(state::Preview { requested: args.preview, ..Default::default() })
     .init_resource::<state::Console>()
     .init_resource::<state::Ticker>()
     .init_resource::<state::Review>()
@@ -124,8 +132,14 @@ fn main() -> ExitCode {
     .add_systems(EguiPrimaryContextPass, panels::panels);
 
     if let Some(path) = args.screenshot {
-        app.insert_resource(shot::ShotConfig { path, frames: args.frames, triggered_at: None })
-            .add_systems(Update, shot::screenshot_and_exit);
+        app.insert_resource(shot::ShotConfig {
+            path,
+            frames: args.frames,
+            triggered_at: None,
+            target: None,
+        })
+        .add_systems(Startup, shot::setup_shot_target)
+        .add_systems(Update, (shot::follow_orbit, shot::screenshot_and_exit));
     }
 
     match app.run() {
